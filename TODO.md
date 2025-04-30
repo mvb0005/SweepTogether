@@ -21,12 +21,17 @@
     *   [ ] Add unit tests for core backend game logic.
     *   [ ] Implement load testing for multiplayer scenarios.
 *   **Frontend Refactor (React/TS):**
-    *   [ ] Migrate existing vanilla JS logic (`gameClient.js`, `network.js`, `ui.js`) into React components and hooks.
-    *   [ ] Convert JavaScript files to TypeScript (`.tsx`, `.ts`).
-    *   [ ] Implement state management (e.g., React Context, Zustand, Redux Toolkit) for game state, player info, socket connection.
-    *   [ ] Re-implement board rendering using React components.
-    *   [ ] Re-implement UI updates based on socket events using React state updates.
-    *   [ ] Handle user input (clicks, flags) through React event handlers.
+    *   [x] Migrate frontend from vanilla JS to React + Vite + TypeScript
+    *   [ ] Add CSS styling to React components (`style.css`)
+    *   [ ] Implement PlayerList component in React
+    *   [ ] Implement Leaderboard component in React
+    *   [ ] Refine UI/UX (game status messages, win/lose indication, etc.)
+    *   [ ] Implement player name setting
+    *   [ ] Implement chat functionality
+    *   [ ] Add unit/integration tests for React components
+    *   [ ] Update Cypress tests for the new React frontend
+    *   [ ] Implement persistent leaderboard storage (e.g., database)
+    *   [ ] Add game creation/selection UI (instead of just URL based)
 *   **UI/UX Polish:**
     *   [ ] Enhance visual design with modern styling (e.g., CSS Modules, Tailwind CSS, Styled Components).
     *   [ ] Add animations for game events (reveals, flags, explosions).

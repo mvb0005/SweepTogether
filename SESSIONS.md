@@ -261,3 +261,18 @@
     *   Determined that the issue was in the test itself rather than the backend implementation, which correctly only awards points for newly revealed cells.
     *   Modified the test to click on cell [1,3] for the second click instead of [1,0], as [1,3] would be a numbered cell that wasn't already revealed by the first click's flood fill.
     *   The fix ensures that each click in the test reveals a new numbered cell, properly testing the scoring system without changing the backend behavior.
+
+## Session 2025-04-30: Frontend Migration to React
+
+*   **Goal:** Replace the vanilla JS frontend with a React application using Vite and TypeScript.
+*   **Steps:**
+    *   Initialized a new React project within the `frontend` directory using Vite.
+    *   Created a basic WebSocket connection hook (`useSocket`).
+    *   Developed `Cell` and `Board` components to render the game grid.
+    *   Refactored `App.tsx` to manage game state (board, players, etc.) received via WebSocket.
+    *   Implemented handlers for `revealTile` and `flagTile` actions, sending events to the backend.
+    *   Configured Nginx (`nginx/nginx.conf`) to support SPA routing (e.g., `/game/{gameId}`).
+    *   Updated `App.tsx` to extract `gameId` from the URL path.
+    *   Debugged and fixed the backend `handleJoinGame` function to emit the correct `gameJoined` event and payload structure expected by the React frontend.
+*   **Outcome:** The frontend now renders the basic Minesweeper board using React, connects to the backend, and receives the initial game state. Basic interaction placeholders are present.
+*   **Next Steps:** Add CSS styling, implement PlayerList and Leaderboard components, refine event handling.
