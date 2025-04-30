@@ -1,8 +1,16 @@
 {
   "devDependencies": {
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@types/socket.io-client": "^1.4.36",
+    "@vitejs/plugin-react": "^4.4.1",
     "cypress": "^14.3.2",
     "nodemon": "^3.1.10",
-    "ts-node": "^10.9.2"
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.4"
   },
   "name": "mines",
   "version": "1.0.0",
@@ -146,6 +154,7 @@
     "side-channel-weakmap": "^1.0.2",
     "signal-exit": "^3.0.7",
     "slice-ansi": "^3.0.0",
+    "socket.io-client": "^4.8.1",
     "sshpk": "^1.18.0",
     "string-width": "^4.2.3",
     "strip-ansi": "^6.0.1",

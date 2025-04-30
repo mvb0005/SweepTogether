@@ -4,15 +4,13 @@ services:
   backend:
     build: ./backend
     ports:
-      - "3000:3000"
+      - "3001:3000" # Changed host port to 3001 to avoid conflict with frontend dev server
     volumes:
       - ./backend:/usr/src/app # Mount backend code
       - /usr/src/app/node_modules # Keep container's node_modules
-    # Use nodemon to watch for changes and run ts-node
     command: npx nodemon --watch src --ext ts --exec 'ts-node' src/server.ts
     environment:
       - NODE_ENV=development
-      # Add database connection details later
       # - DATABASE_URL=postgresql://user:password@db:5432/minesweeper
     depends_on:
       - db
@@ -21,60 +19,71 @@ services:
 
   frontend:
     build: ./frontend
-    ports:
-      - "8080:80"
+    # Override command to run Vite dev server and expose it
+    command: ["npm", "run", "dev", "--", "--host"]
     volumes:
-      # This volume mount enables frontend "hot reloading" (serving updated files)
-      - ./frontend:/usr/share/nginx/html
-    depends_on:
-      - backend
+      - ./frontend:/app # Mount local code for HMR
+      - /app/node_modules # Keep container's node_modules separate
+    # Expose Vite's port (defined in vite.config.js)
+    ports:
+      - "3000:3000"
+    # Remove Nginx healthcheck - Vite dev server runs instead
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:80"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 5
+    #   start_period: 15s
     networks:
       - minesweeper-net
-    # Add healthcheck for Nginx
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s # Give Nginx some time to start up initially
+
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - "8080:80" # Main entry point
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      # Wait for frontend service container to start
+      frontend:
+        condition: service_started
+      # Wait for backend container to start
+      backend:
+        condition: service_started
+    networks:
+      - minesweeper-net
+    restart: unless-stopped
 
   db:
     image: postgres:14-alpine
     environment:
       POSTGRES_DB: minesweeper
       POSTGRES_USER: user
-      POSTGRES_PASSWORD: password # Use environment variables or secrets in production!
+      POSTGRES_PASSWORD: password
     volumes:
-      - postgres_data:/var/lib/postgresql/data # Persist database data
+      - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432" # Expose PostgreSQL port (optional, for external tools)
+      - "5432:5432"
     networks:
       - minesweeper-net
 
-  # New Cypress service
   cypress:
     build:
       context: .
       dockerfile: Dockerfile.cypress
-    # Mount volumes for test results (optional but recommended)
+    profiles: ["test"]
     volumes:
       - ./cypress/screenshots:/e2e/cypress/screenshots
       - ./cypress/videos:/e2e/cypress/videos
-    # Depends on frontend being ready (which depends on backend -> db)
-    # Docker Compose v2+ automatically waits for healthchecks of dependencies
     depends_on:
-      frontend:
-        condition: service_healthy # Explicitly wait for the healthcheck
+      # Depends on the main proxy
+      nginx:
+        condition: service_started
     networks:
       - minesweeper-net
     environment:
-      - CYPRESS_BASE_URL=http://frontend:80 
-    # The command to run tests. This service will run the tests and then exit.
-    # It's typically run manually via "docker-compose run cypress"
-    # or triggered by an external scheduler.
+      - CYPRESS_BASE_URL=http://nginx:80
     command: npx cypress run --browser chrome --headless
-    # Restart when the tests are done
-    restart: "unless-stopped"
 
 volumes:
   postgres_data:
