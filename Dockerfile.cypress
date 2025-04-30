@@ -1,0 +1,16 @@
+# Use an official Cypress image with browsers included
+FROM cypress/included:latest
+
+# Set the working directory inside the container
+WORKDIR /e2e
+
+# Copy package.json and package-lock.json (if available)
+# and install dependencies including Cypress itself and any plugins
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# Copy Cypress configuration and test files
+COPY cypress.config.js ./
+COPY cypress ./cypress
+
+# Note: The actual test command will be specified in docker-compose.yml

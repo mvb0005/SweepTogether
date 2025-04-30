@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/usr/src/app # Mount backend code
+      - /usr/src/app/node_modules # Keep container's node_modules
+    # Use nodemon to watch for changes and run ts-node
+    command: npx nodemon --watch src --ext ts --exec 'ts-node' src/server.ts
+    environment:
+      - NODE_ENV=development
+      # Add database connection details later
+      # - DATABASE_URL=postgresql://user:password@db:5432/minesweeper
+    depends_on:
+      - db
+    networks:
+      - minesweeper-net
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    volumes:
+      # This volume mount enables frontend "hot reloading" (serving updated files)
+      - ./frontend:/usr/share/nginx/html
+    depends_on:
+      - backend
+    networks:
+      - minesweeper-net
+    # Add healthcheck for Nginx
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s # Give Nginx some time to start up initially
+
+  db:
+    image: postgres:14-alpine
+    environment:
+      POSTGRES_DB: minesweeper
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password # Use environment variables or secrets in production!
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Persist database data
+    ports:
+      - "5432:5432" # Expose PostgreSQL port (optional, for external tools)
+    networks:
+      - minesweeper-net
+
+  # New Cypress service
+  cypress:
+    build:
+      context: .
+      dockerfile: Dockerfile.cypress
+    # Mount volumes for test results (optional but recommended)
+    volumes:
+      - ./cypress/screenshots:/e2e/cypress/screenshots
+      - ./cypress/videos:/e2e/cypress/videos
+    # Depends on frontend being ready (which depends on backend -> db)
+    # Docker Compose v2+ automatically waits for healthchecks of dependencies
+    depends_on:
+      frontend:
+        condition: service_healthy # Explicitly wait for the healthcheck
+    networks:
+      - minesweeper-net
+    environment:
+      - CYPRESS_BASE_URL=http://frontend:80 
+    # The command to run tests. This service will run the tests and then exit.
+    # It's typically run manually via "docker-compose run cypress"
+    # or triggered by an external scheduler.
+    command: npx cypress run --browser chrome --headless
+    # Restart when the tests are done
+    restart: "unless-stopped"
+
+volumes:
+  postgres_data:
+
+networks:
+  minesweeper-net:
+    driver: bridge
