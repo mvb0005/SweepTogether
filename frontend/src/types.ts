@@ -1,12 +1,10 @@
 // Basic types for the frontend game state
 
 export interface CellState {
-  isRevealed: boolean;
-  isMine: boolean; // Note: Server might not send this until game over
-  isFlagged: boolean;
-  neighborMineCount: number;
-  revealedBy?: string; // Player ID who revealed it
-  flaggedBy?: string[]; // Player IDs who flagged it
+  revealed: boolean;
+  flagged: boolean;
+  isMine?: boolean; // Note: Server might not send this until game over
+  adjacentMines?: number; // Using same property name as backend
 }
 
 export type BoardState = CellState[][];
@@ -14,14 +12,15 @@ export type BoardState = CellState[][];
 export interface Player {
   id: string;
   score: number;
-  name: string; // Or other identifying info
-  isLocked: boolean;
+  username?: string; // Changed from name to username to match backend
+  isLocked?: boolean;
   lockedUntil?: number; // Timestamp
+  status?: string; // Player status from backend (ACTIVE, LOCKED_OUT, etc.)
 }
 
 export interface LeaderboardEntry {
   playerId: string;
-  name: string;
+  username?: string; // Changed from name to username to match backend
   score: number;
 }
 
@@ -33,7 +32,18 @@ export interface GameState {
   winner?: string; // Player ID or null
 }
 
-// Types for Socket Payloads (mirroring backend types)
+// Updated types for Socket Payloads (matching backend)
+export interface GameStatePayload {
+  boardState: BoardState;
+  boardConfig?: { rows: number; cols: number; mines: number };
+  players: Record<string, Player>;
+  pendingReveals?: any[]; // Backend specific data
+  gameOver: boolean;
+  winner?: string;
+  message?: string;
+  playerId?: string; // Server might include the player's ID in responses
+}
+
 export interface UpdateBoardPayload {
   board: BoardState;
 }
@@ -43,8 +53,9 @@ export interface UpdatePlayersPayload {
 }
 
 export interface GameOverPayload {
+  boardState?: BoardState; // Changed from 'board' to 'boardState' to match backend
+  message?: string;
   winner?: string; // Player ID or null
-  board: BoardState; // Final board state
 }
 
 export interface PlayerLockoutPayload {

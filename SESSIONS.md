@@ -164,7 +164,7 @@
         *   Tests now generate unique `gameId`s for each run.
 *   **Outcome:** E2E tests can now reliably set up specific game configurations (dimensions, mine count, or even exact board layouts) before interacting with the frontend, enabling more controlled and predictable testing scenarios.
 
-### Session: 2025-04-26 - 9 (Refining Fixed Board Test)
+### Session: 2025-04-27 - 9 (Refining Fixed Board Test)
 
 *   **Summary:** Debugged and refined the `fixed_board.cy.js` test.
 *   **Specifics:**
@@ -276,3 +276,19 @@
     *   Debugged and fixed the backend `handleJoinGame` function to emit the correct `gameJoined` event and payload structure expected by the React frontend.
 *   **Outcome:** The frontend now renders the basic Minesweeper board using React, connects to the backend, and receives the initial game state. Basic interaction placeholders are present.
 *   **Next Steps:** Add CSS styling, implement PlayerList and Leaderboard components, refine event handling.
+
+## Session 2025-04-30: Performance Optimizations & Test Structure
+
+*   **Goal:** Improve performance of the infinite world generation and establish proper test directory structure.
+*   **Steps:**
+    *   Analyzed performance characteristics of the Simplex noise function used for mine placement.
+    *   Implemented caching strategies for both `isMine` and `getCellValue` functions:
+        *   Added Map-based caches with controlled size limits to prevent memory issues.
+        *   Set up a FIFO eviction strategy for the caches when they exceed size thresholds.
+        *   Implemented cache key generation based on coordinates.
+    *   Restructured the test framework:
+        *   Removed old test files from `backend/src/` directory.
+        *   Created proper test directory at `backend/tests/unit/`.
+        *   Implemented new tests for `worldGenerator` functions without relying on mocks.
+        *   Tests now use the deterministic nature of the seeded noise function.
+*   **Outcome:** The worldGenerator functions now perform significantly better with caching, reducing redundant calculations. The test directory structure follows best practices and tests verify the actual behavior of the functions.

@@ -7,7 +7,6 @@ import path from 'path';
 import { GameConfig } from './types';
 import { setupSocketHandlers, games, pendingGameConfigs } from './socketHandlers';
 
-// --- Initialize Express, HTTP Server, Socket.IO ---
 const app = express();
 
 // Middleware to parse JSON bodies

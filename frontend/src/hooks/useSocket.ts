@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
-// Use default import for io and named import for Socket type
 import io, { Socket } from 'socket.io-client';
 
 // Define the shape of the hook's return value
 interface UseSocketReturn {
-  socket: typeof Socket | null;
+    socket: Socket | null;
   isConnected: boolean;
 }
 
@@ -12,7 +11,7 @@ interface UseSocketReturn {
  * Custom React hook to manage Socket.IO connection.
  */
 export function useSocket(): UseSocketReturn {
-  const [socket, setSocket] = useState<typeof Socket | null>(null);
+    const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
 
   useEffect(() => {

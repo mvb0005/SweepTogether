@@ -11,7 +11,8 @@ import {
   PlayerLockoutPayload,
   PlayerUnlockPayload,
   UpdateLeaderboardPayload,
-  GameJoinedPayload
+  GameJoinedPayload,
+  GameStatePayload
 } from './types';
 
 function App() {
@@ -46,6 +47,15 @@ function App() {
     }
   };
 
+  const handleChordCell = (row: number, col: number) => {
+    if (socket && isConnected && !isPlayerLocked && !isGameOver) {
+      console.log(`Sending chordClick event for cell: (${row}, ${col})`);
+      socket.emit('chordClick', { row, col });
+    } else {
+      console.log('Cannot chord: Socket not connected, player locked, or game over.');
+    }
+  };
+
   // --- useEffect Hooks ---
   useEffect(() => {
     const pathSegments = window.location.pathname.split('/').filter(Boolean);
@@ -68,38 +78,54 @@ function App() {
       console.log(`Socket connected, attempting to join game: ${gameId}`);
       socket.emit('joinGame', gameId);
 
-      // ... (socket event handlers remain the same) ...
-      socket.on('gameJoined', (data: GameJoinedPayload) => {
-        console.log('Game joined successfully!', data);
-        setPlayerId(data.playerId);
-        setBoard(data.gameState.board);
-        setPlayers(data.gameState.players);
-        setLeaderboard(data.gameState.leaderboard);
-        setIsGameOver(data.gameState.gameOver);
-        setWinner(data.gameState.winner);
-      });
-      socket.on('updateBoard', (data: UpdateBoardPayload) => {
+      // Set up event listeners
+      const handleGameState = (data: GameStatePayload) => {
+        console.log('Game state received!', data);
+        setPlayerId(data.playerId || socket.id);
+        if (data.boardState) {
+          console.log('Setting initial board state:', data.boardState);
+          setBoard(data.boardState);
+        }
+        if (data.players) {
+          console.log('Setting players:', data.players);
+          setPlayers(data.players);
+        }
+        if (data.message) {
+          console.log('Server message:', data.message);
+        }
+        setIsGameOver(data.gameOver || false);
+        setWinner(data.winner);
+      };
+
+      const handleUpdateBoard = (data: UpdateBoardPayload) => {
         console.log('Received board update');
         setBoard(data.board);
-      });
-      socket.on('updatePlayers', (data: UpdatePlayersPayload) => {
+      };
+
+      const handleUpdatePlayers = (data: UpdatePlayersPayload) => {
         console.log('Received player update', data.players);
         setPlayers(data.players);
         if (!playerId && socket.id && data.players[socket.id]) {
             setPlayerId(socket.id);
         }
-      });
-      socket.on('updateLeaderboard', (data: UpdateLeaderboardPayload) => {
+      };
+
+      const handleUpdateLeaderboard = (data: UpdateLeaderboardPayload) => {
         console.log('Received leaderboard update', data.leaderboard);
         setLeaderboard(data.leaderboard);
-      });
-      socket.on('gameOver', (data: GameOverPayload) => {
+      };
+
+      const handleGameOver = (data: GameOverPayload) => {
         console.log('Received game over', data);
         setIsGameOver(true);
         setWinner(data.winner);
-        setBoard(data.board);
-      });
-      socket.on('playerLocked', (data: PlayerLockoutPayload) => {
+        if (data.boardState) {
+          console.log('Setting final board state from game over event');
+          setBoard(data.boardState);
+        }
+      };
+
+      const handlePlayerLocked = (data: PlayerLockoutPayload) => {
         console.log(`Player ${data.playerId} locked until ${new Date(data.lockedUntil).toLocaleTimeString()}`);
         setPlayers(prev => ({
           ...prev,
@@ -107,8 +133,9 @@ function App() {
             [data.playerId]: { ...prev[data.playerId], isLocked: true, lockedUntil: data.lockedUntil }
           })
         }));
-      });
-       socket.on('playerUnlocked', (data: PlayerUnlockPayload) => {
+      };
+
+      const handlePlayerUnlocked = (data: PlayerUnlockPayload) => {
         console.log(`Player ${data.playerId} unlocked`);
         setPlayers(prev => ({
           ...prev,
@@ -116,17 +143,26 @@ function App() {
             [data.playerId]: { ...prev[data.playerId], isLocked: false, lockedUntil: undefined }
           })
         }));
-      });
+      };
+
+      // Register event handlers
+      socket.on('gameState', handleGameState);
+      socket.on('updateBoard', handleUpdateBoard);
+      socket.on('updatePlayers', handleUpdatePlayers);
+      socket.on('updateLeaderboard', handleUpdateLeaderboard);
+      socket.on('gameOver', handleGameOver);
+      socket.on('playerLocked', handlePlayerLocked);
+      socket.on('playerUnlocked', handlePlayerUnlocked);
 
       return () => {
         console.log('Removing socket listeners...');
-        socket.off('gameJoined');
-        socket.off('updateBoard');
-        socket.off('updatePlayers');
-        socket.off('updateLeaderboard');
-        socket.off('gameOver');
-        socket.off('playerLocked');
-        socket.off('playerUnlocked');
+        socket.off('gameState', handleGameState);
+        socket.off('updateBoard', handleUpdateBoard);
+        socket.off('updatePlayers', handleUpdatePlayers);
+        socket.off('updateLeaderboard', handleUpdateLeaderboard);
+        socket.off('gameOver', handleGameOver);
+        socket.off('playerLocked', handlePlayerLocked);
+        socket.off('playerUnlocked', handlePlayerUnlocked);
       };
     }
   }, [socket, isConnected, gameId, playerId]);
@@ -139,7 +175,7 @@ function App() {
       {isConnected && playerId && <p>Your Player ID: {playerId}</p>}
       {isConnected && gameId && <p>Game ID: {gameId}</p>}
       {isGameOver && (
-        <h2>Game Over! {winner ? `Winner: ${players[winner]?.name || winner}` : 'No winner.'}</h2>
+        <h2>Game Over! {winner ? `Winner: ${players[winner]?.username || winner}` : 'No winner.'}</h2>
       )}
       {isPlayerLocked && (
         <p style={{ color: 'red', fontWeight: 'bold' }}>
@@ -154,6 +190,7 @@ function App() {
             boardData={board}
             onRevealCell={handleRevealCell}
             onFlagCell={handleFlagCell}
+            onChordCell={handleChordCell}
             isPlayerLocked={isPlayerLocked}
           />
         </div>
@@ -163,7 +200,7 @@ function App() {
           <ul>
             {Object.values(players).map(p => (
               <li key={p.id} style={{ color: p.isLocked ? 'grey' : 'inherit' }}>
-                {p.name || p.id.substring(0, 6)}
+                {p.username || p.id.substring(0, 6)}
                 (Score: {p.score})
                 {p.isLocked ? ` (Locked until ${new Date(p.lockedUntil!).toLocaleTimeString()})` : ''}
                 {p.id === playerId ? <strong> (You)</strong> : ''}
@@ -177,7 +214,7 @@ function App() {
           <ol>
             {leaderboard.map((entry, index) => (
               <li key={entry.playerId || index}>
-                {entry.name || entry.playerId.substring(0, 6)}: {entry.score}
+                {entry.username || entry.playerId.substring(0, 6)}: {entry.score}
               </li>
             ))}
           </ol>

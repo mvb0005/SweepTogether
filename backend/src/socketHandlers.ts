@@ -23,6 +23,7 @@ import {
   DEFAULT_SCORING_CONFIG,
   isPlayerLockedOut
 } from './game';
+import { generateRandomName } from './utils';
 
 /**
  * Map of all active games, accessible by all handler functions
@@ -268,12 +269,16 @@ export function handleJoinGame(socket: Socket, gameId: string, io: Server): void
     console.log(`Game ${trimmedGameId} found. Joining existing game.`);
   }
 
-  // Add player to the game state with proper initialization
+  // Add player to the game state with proper initialization and a fun random name
+  const randomPlayerName = generateRandomName();
   gameState.players[socket.id] = { 
     id: socket.id, 
     score: 0,
-    status: PlayerStatus.ACTIVE
+    status: PlayerStatus.ACTIVE,
+    username: randomPlayerName
   };
+
+  console.log(`Assigned name "${randomPlayerName}" to player ${socket.id}`);
 
   // Store gameId on the socket
   socket.data.gameId = trimmedGameId;
@@ -416,9 +421,10 @@ export function handleRevealTile(socket: Socket, data: unknown, io: Server): voi
       gameState.gameOver = true;
       
       const finalBoardState = getBoardStateForClient(gameState.board);
+      const playerName = gameState.players[socket.id]?.username || socket.id;
       const gameOverPayload: GameOverPayload = {
         boardState: finalBoardState,
-        message: `Game over! Player ${socket.id} hit a mine!`,
+        message: `Game over! ${playerName} hit a mine!`,
         winner: undefined
       };
       
@@ -437,6 +443,7 @@ export function handleRevealTile(socket: Socket, data: unknown, io: Server): voi
     
     // If not game over, just emit the updated game state with the hit mine
     const clientBoardState = getBoardStateForClient(gameState.board);
+    const playerName = gameState.players[socket.id]?.username || socket.id;
     const mineHitPayload: GameStatePayload = {
       boardState: clientBoardState,
       boardConfig: gameState.boardConfig,
@@ -444,7 +451,7 @@ export function handleRevealTile(socket: Socket, data: unknown, io: Server): voi
       pendingReveals: gameState.pendingReveals,
       gameOver: gameState.gameOver,
       winner: gameState.winner,
-      message: `Player ${socket.id} hit a mine and is locked out!`
+      message: `${playerName} hit a mine and is locked out!`
     };
     
     io.to(gameId).emit('gameState', mineHitPayload);
@@ -752,7 +759,289 @@ export function setupSocketHandlers(io: Server, socket: Socket): void {
   socket.on('joinGame', (gameId: string) => handleJoinGame(socket, gameId, io));
   socket.on('revealTile', (data: unknown) => handleRevealTile(socket, data, io));
   socket.on('flagTile', (data: unknown) => handleFlagTile(socket, data, io));
+  socket.on('chordClick', (data: unknown) => handleChordClick(socket, data, io));
   socket.on('disconnect', () => handleDisconnect(socket, io));
   
   // Could add additional handlers for chat, player name setting, etc.
+}
+
+/**
+ * Handle a chord click action from a player
+ * 
+ * @param socket - The socket of the player making the chord click
+ * @param data - The payload containing row and column to chord click
+ * @param io - The Socket.IO server instance
+ */
+export function handleChordClick(socket: Socket, data: unknown, io: Server): void {
+  // Validate data type and structure
+  if (typeof data !== 'object' || data === null ||
+    typeof (data as any).row !== 'number' ||
+    typeof (data as any).col !== 'number') {
+    emitError(socket, 'Invalid chordClick data format. Expected { row: number, col: number }.');
+    return;
+  }
+
+  const { row, col } = data as RevealTilePayload;
+
+  // Validate row/col values are integers
+  if (!Number.isInteger(row) || !Number.isInteger(col)) {
+    emitError(socket, 'Invalid coordinates. Row and column must be integers.');
+    return;
+  }
+
+  // Check for associated gameId
+  const gameId = socket.data.gameId;
+  if (typeof gameId !== 'string') {
+    emitError(socket, 'Cannot chord click: Not associated with a game. Please join a game first.');
+    return;
+  }
+
+  // Retrieve game state
+  const gameState = games.get(gameId);
+  if (!gameState) {
+    emitError(socket, `Cannot chord click: Game ${gameId} not found on server.`);
+    return;
+  }
+
+  // Don't allow actions if game is over
+  if (gameState.gameOver) {
+    emitError(socket, 'Cannot chord click: Game is already over.');
+    return;
+  }
+
+  // Check if player is locked out
+  const player = gameState.players[socket.id];
+  if (player && isPlayerLockedOut(player)) {
+    const lockedUntil = new Date(player.lockedUntil!).toISOString();
+    emitError(socket, `Cannot chord click: You are locked out until ${lockedUntil}`);
+
+    // Emit updated player status
+    const statusUpdatePayload: PlayerStatusUpdatePayload = {
+      playerId: player.id,
+      status: player.status,
+      lockedUntil: player.lockedUntil
+    };
+
+    io.to(gameId).emit('playerStatusUpdate', statusUpdatePayload);
+    return;
+  }
+
+  console.log(`chordClick event received for game ${gameId}:`, { row, col });
+
+  // Get the clicked cell
+  if (row < 0 || row >= gameState.board.length ||
+    col < 0 || col >= gameState.board[0].length) {
+    emitError(socket, 'Invalid coordinates: Out of bounds.');
+    return;
+  }
+
+  const cell = gameState.board[row][col];
+
+  // Check if the cell is revealed and has a number
+  if (!cell.revealed || cell.isMine) {
+    emitError(socket, 'Cannot chord click: Cell must be revealed and have adjacent mines.');
+    return;
+  }
+
+  // Count adjacent flags
+  const adjacentFlags = countAdjacentFlags(gameState.board, row, col);
+
+  // If flag count doesn't match adjacent mines, do nothing
+  if (adjacentFlags !== cell.adjacentMines) {
+    emitError(socket, `Cannot chord click: Flag count (${adjacentFlags}) doesn't match adjacent mines (${cell.adjacentMines}).`);
+    return;
+  }
+
+  // Reveal all adjacent non-flagged cells
+  let hitMine = false;
+  const revealedCells = new Set<string>();
+  const adjacentDirections = [
+    [-1, -1], [-1, 0], [-1, 1],
+    [0, -1], [0, 1],
+    [1, -1], [1, 0], [1, 1]
+  ];
+
+  // First pass: Check if any of the adjacent cells is a mine and not flagged
+  // This is to prevent revealing cells if there's a mine that would be hit
+  for (const [dRow, dCol] of adjacentDirections) {
+    const newRow = row + dRow;
+    const newCol = col + dCol;
+
+    // Skip if out of bounds
+    if (newRow < 0 || newRow >= gameState.board.length ||
+      newCol < 0 || newCol >= gameState.board[0].length) {
+      continue;
+    }
+
+    const adjacentCell = gameState.board[newRow][newCol];
+
+    // If cell is already revealed, skip it
+    if (adjacentCell.revealed) {
+      continue;
+    }
+
+    // If cell is flagged, skip it
+    if (adjacentCell.flagged) {
+      continue;
+    }
+
+    // If the cell is a mine and not flagged, we'd hit it
+    if (adjacentCell.isMine) {
+      hitMine = true;
+
+      // Reveal this mine as it was hit
+      adjacentCell.revealed = true;
+      revealedCells.add(`${newRow},${newCol}`);
+
+      // Apply mine hit penalty and lock out the player
+      if (player) {
+        // Apply penalty
+        player.score = Math.max(0, player.score - gameState.scoringConfig.mineHitPenalty);
+
+        // Lock out player
+        player.status = PlayerStatus.LOCKED_OUT;
+        player.lockedUntil = Date.now() + gameState.scoringConfig.lockoutDurationMs;
+
+        // Emit lockout notification
+        const statusUpdatePayload: PlayerStatusUpdatePayload = {
+          playerId: player.id,
+          status: PlayerStatus.LOCKED_OUT,
+          lockedUntil: player.lockedUntil
+        };
+
+        io.to(gameId).emit('playerStatusUpdate', statusUpdatePayload);
+
+        // Emit score update
+        const scoreUpdatePayload: ScoreUpdatePayload = {
+          playerId: player.id,
+          newScore: player.score,
+          scoreDelta: -gameState.scoringConfig.mineHitPenalty,
+          reason: "Hit a mine with chord click"
+        };
+
+        io.to(gameId).emit('scoreUpdate', scoreUpdatePayload);
+      }
+    }
+  }
+
+  // Second pass: If no mine was hit or we're in a game over state after hitting a mine,
+  // reveal all adjacent non-flagged cells
+  if (!hitMine) {
+    // Process all adjacent cells
+    for (const [dRow, dCol] of adjacentDirections) {
+      const newRow = row + dRow;
+      const newCol = col + dCol;
+
+      // Skip if out of bounds
+      if (newRow < 0 || newRow >= gameState.board.length ||
+        newCol < 0 || newCol >= gameState.board[0].length) {
+        continue;
+      }
+
+      const adjacentCell = gameState.board[newRow][newCol];
+
+      // If cell is already revealed, skip it
+      if (adjacentCell.revealed) {
+        continue;
+      }
+
+      // If cell is flagged, skip it
+      if (adjacentCell.flagged) {
+        continue;
+      }
+
+      // Reveal this cell
+      const cellResult = revealTile(newRow, newCol, gameState, socket.id);
+
+      if (cellResult.visitedCells) {
+        // Add all revealed cells to our set
+        cellResult.visitedCells.forEach(coordKey => {
+          revealedCells.add(coordKey);
+        });
+      }
+
+      // If we revealed a mine, don't continue revealing more cells
+      if (cellResult.mineHit) {
+        hitMine = true;
+        break;
+      }
+    }
+  }
+
+  // Check if the game is over after this move
+  const isGameOverNow = hitMine || checkWinCondition(gameState);
+
+  if (isGameOverNow) {
+    gameState.gameOver = true;
+
+    if (hitMine) {
+      // Game over by mine hit
+      const finalBoardState = getBoardStateForClient(gameState.board);
+      const playerName = gameState.players[socket.id]?.username || socket.id;
+      const gameOverPayload: GameOverPayload = {
+        boardState: finalBoardState,
+        message: `Game over! ${playerName} hit a mine with a chord click!`,
+        winner: undefined
+      };
+
+      io.to(gameId).emit('gameOver', gameOverPayload);
+    } else {
+      // Game won by revealing all non-mine cells
+      handleGameWin(gameId, socket.id, io);
+    }
+
+    // Clear the mine reveal timer
+    const timer = mineRevealTimers.get(gameId);
+    if (timer) {
+      clearInterval(timer);
+      mineRevealTimers.delete(gameId);
+    }
+
+    return;
+  }
+
+  // Broadcast updated game state
+  const updatedClientBoardState = getBoardStateForClient(gameState.board);
+  console.log(`Broadcasting updated gameState to room ${gameId} after chord click`);
+
+  const gameStatePayload: GameStatePayload = {
+    boardState: updatedClientBoardState,
+    boardConfig: gameState.boardConfig,
+    players: gameState.players,
+    pendingReveals: gameState.pendingReveals,
+    gameOver: gameState.gameOver,
+    winner: gameState.winner,
+    message: hitMine ? `Player ${socket.id} hit a mine with a chord click!` : undefined
+  };
+
+  io.to(gameId).emit('gameState', gameStatePayload);
+}
+
+/**
+ * Helper function to count adjacent flags
+ */
+function countAdjacentFlags(board: Board, row: number, col: number): number {
+  let count = 0;
+  const adjacentDirections = [
+    [-1, -1], [-1, 0], [-1, 1],
+    [0, -1], [0, 1],
+    [1, -1], [1, 0], [1, 1]
+  ];
+
+  for (const [dRow, dCol] of adjacentDirections) {
+    const newRow = row + dRow;
+    const newCol = col + dCol;
+
+    // Skip if out of bounds
+    if (newRow < 0 || newRow >= board.length ||
+      newCol < 0 || newCol >= board[0].length) {
+      continue;
+    }
+
+    if (board[newRow][newCol].flagged) {
+      count++;
+    }
+  }
+
+  return count;
 }

@@ -8,10 +8,17 @@ interface BoardProps {
   boardData: BoardState;
   onRevealCell: (row: number, col: number) => void;
   onFlagCell: (row: number, col: number) => void;
+  onChordCell: (row: number, col: number) => void; // Add chord handler
   isPlayerLocked: boolean; // Pass down player lock status
 }
 
-const Board: React.FC<BoardProps> = ({ boardData, onRevealCell, onFlagCell, isPlayerLocked }) => {
+const Board: React.FC<BoardProps> = ({ 
+  boardData, 
+  onRevealCell, 
+  onFlagCell, 
+  onChordCell,
+  isPlayerLocked 
+}) => {
   if (!boardData || boardData.length === 0) {
     return <div>Loading board...</div>;
   }
@@ -43,6 +50,7 @@ const Board: React.FC<BoardProps> = ({ boardData, onRevealCell, onFlagCell, isPl
             colIndex={colIndex}
             onReveal={onRevealCell}
             onFlag={onFlagCell}
+            onChord={onChordCell}
             isLocked={isPlayerLocked} // Pass lock status to Cell
           />
         ))

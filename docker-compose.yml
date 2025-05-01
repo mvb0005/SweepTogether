@@ -42,7 +42,7 @@ services:
     ports:
       - "8080:80" # Main entry point
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
     depends_on:
       # Wait for frontend service container to start
       frontend:
