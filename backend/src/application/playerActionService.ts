@@ -10,6 +10,7 @@ import { EventBus } from '../infrastructure/eventBus/EventBus';
 import { SocketEventMap } from '../infrastructure/network/socketEvents';
 import { GameStateService } from './gameStateService';
 import { GameUpdateService } from './gameUpdateService';
+import { ScoreService } from './scoreService';
 import { PlayerStatus, Cell, GameState, Player } from '../domain/types';
 import * as gridLogic from '../domain/gridLogic';
 
@@ -17,7 +18,8 @@ export class PlayerActionService {
     constructor(
         private eventBus: EventBus<SocketEventMap>,
         private gameStateService: GameStateService,
-        private gameUpdateService: GameUpdateService
+        private gameUpdateService: GameUpdateService,
+        private scoreService: ScoreService
     ) {
         this.eventBus.subscribe('revealTile', this.handleRevealTile.bind(this));
         this.eventBus.subscribe('flagTile', this.handleFlagTile.bind(this));
@@ -100,9 +102,8 @@ export class PlayerActionService {
                 player.status = PlayerStatus.LOCKED_OUT;
                 player.lockedUntil = Date.now() + gameState.scoringConfig.lockoutDurationMs;
 
-                // Calculate score deduction
-                const scoreDelta = -gameState.scoringConfig.mineHitPenalty;
-                player.score += scoreDelta;
+                // Update score via ScoreService (handles score calculation and update notification)
+                this.scoreService.handleMineHit(gameId, socketId);
 
                 // Persist the revealed mine state
                 this.gameStateService.updateGridCell(gameId, hitMine);
@@ -116,16 +117,7 @@ export class PlayerActionService {
                     player.lockedUntil
                 );
 
-                // 2. Score update
-                this.gameUpdateService.sendScoreUpdate(
-                    gameId,
-                    socketId,
-                    player.score,
-                    scoreDelta,
-                    'Hit Mine'
-                );
-
-                // 3. Tile update for the revealed mine
+                // 2. Tile update for the revealed mine
                 this.gameUpdateService.sendTileUpdate(
                     gameId,
                     {
@@ -147,24 +139,13 @@ export class PlayerActionService {
                     return;
                 }
 
-                // Calculate score increase (only for non-mine cells)
-                const scoreDelta = revealedCells.length * gameState.scoringConfig.numberRevealPoints;
-                player.score += scoreDelta;
+                // Update score via ScoreService (handles score calculation and update notification)
+                this.scoreService.handleCellReveal(gameId, socketId, revealedCells);
 
                 // Persist the state changes for all revealed cells
                 this.gameStateService.updateGridCells(gameId, revealedCells);
 
-                // Send updates to clients
-                // 1. Score update
-                this.gameUpdateService.sendScoreUpdate(
-                    gameId,
-                    socketId,
-                    player.score,
-                    scoreDelta,
-                    'Reveal Cells'
-                );
-
-                // 2. Tiles update for all revealed cells
+                // Send tile updates to clients
                 const tilesUpdatePayload = revealedCells.map(cell => ({
                     x: cell.x,
                     y: cell.y,
@@ -212,35 +193,10 @@ export class PlayerActionService {
             // Persist the updated cell state
             this.gameStateService.updateGridCell(gameId, updatedCell);
 
-            // Calculate score change based on flag action
-            let scoreDelta = 0;
-            let reason = '';
+            // Update score via ScoreService (handles score calculation and update notification)
+            this.scoreService.handleFlagToggle(gameId, socketId, updatedCell.flagged);
 
-            if (updatedCell.flagged) {
-                // Added a flag
-                scoreDelta = gameState.scoringConfig.flagPlacePoints;
-                reason = 'Place Flag';
-            } else {
-                // Removed a flag
-                scoreDelta = gameState.scoringConfig.flagRemovePoints;
-                reason = 'Remove Flag';
-            }
-
-            // Update player score
-            player.score += scoreDelta;
-
-            // Send updates to clients
-
-            // 1. Score update
-            this.gameUpdateService.sendScoreUpdate(
-                gameId,
-                socketId,
-                player.score,
-                scoreDelta,
-                reason
-            );
-
-            // 2. Tile update for the flagged/unflagged cell
+            // Send tile update for the flagged/unflagged cell
             this.gameUpdateService.sendTileUpdate(
                 gameId,
                 {
@@ -288,9 +244,8 @@ export class PlayerActionService {
                 player.status = PlayerStatus.LOCKED_OUT;
                 player.lockedUntil = Date.now() + gameState.scoringConfig.lockoutDurationMs;
 
-                // Calculate score deduction
-                const scoreDelta = -gameState.scoringConfig.mineHitPenalty;
-                player.score += scoreDelta;
+                // Update score via ScoreService (handles score calculation and update notification)
+                this.scoreService.handleMineHit(gameId, socketId, 'Hit Mine (Chord Click)');
 
                 // Persist the revealed mine state
                 this.gameStateService.updateGridCell(gameId, hitMine);
@@ -304,16 +259,7 @@ export class PlayerActionService {
                     player.lockedUntil
                 );
 
-                // 2. Score update
-                this.gameUpdateService.sendScoreUpdate(
-                    gameId,
-                    socketId,
-                    player.score,
-                    scoreDelta,
-                    'Hit Mine (Chord Click)'
-                );
-
-                // 3. Tile update for the revealed mine
+                // 2. Tile update for the revealed mine
                 this.gameUpdateService.sendTileUpdate(
                     gameId,
                     {
@@ -336,24 +282,13 @@ export class PlayerActionService {
                     return;
                 }
 
-                // Calculate score increase (only for non-mine cells)
-                const scoreDelta = revealedCells.length * gameState.scoringConfig.numberRevealPoints;
-                player.score += scoreDelta;
+                // Update score via ScoreService (handles score calculation and update notification)
+                this.scoreService.handleCellReveal(gameId, socketId, revealedCells, 'Chord Click Reveal');
 
                 // Persist the state changes for all revealed cells
                 this.gameStateService.updateGridCells(gameId, revealedCells);
 
-                // Send updates to clients
-                // 1. Score update
-                this.gameUpdateService.sendScoreUpdate(
-                    gameId,
-                    socketId,
-                    player.score,
-                    scoreDelta,
-                    'Chord Click Reveal'
-                );
-
-                // 2. Tiles update for all revealed cells
+                // Send tile updates to clients
                 const tilesUpdatePayload = revealedCells.map(cell => ({
                     x: cell.x,
                     y: cell.y,

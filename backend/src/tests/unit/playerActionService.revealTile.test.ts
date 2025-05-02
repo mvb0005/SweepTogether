@@ -26,6 +26,7 @@
 import { PlayerActionService } from '../../application/playerActionService';
 import { GameStateService } from '../../application/gameStateService';
 import { GameUpdateService } from '../../application/gameUpdateService';
+import { ScoreService } from '../../application/scoreService';
 import { EventBus } from '../../infrastructure/eventBus/EventBus';
 import { SocketEventMap } from '../../infrastructure/network/socketEvents';
 import { Cell, GameState, PlayerStatus, GameConfig, ScoringConfig, Player } from '../../domain/types';
@@ -33,6 +34,7 @@ import * as gridLogic from '../../domain/gridLogic';
 
 // Mock dependencies
 jest.mock('../../domain/gridLogic');
+jest.mock('../../application/scoreService');
 const mockedGridLogic = gridLogic as jest.Mocked<typeof gridLogic>;
 
 describe('PlayerActionService', () => {
@@ -40,6 +42,7 @@ describe('PlayerActionService', () => {
   let mockEventBus: jest.Mocked<EventBus<SocketEventMap>>;
   let mockGameStateService: jest.Mocked<Partial<GameStateService>>;
   let mockGameUpdateService: jest.Mocked<Partial<GameUpdateService>>;
+  let mockScoreService: jest.Mocked<ScoreService>;
   let playerActionService: PlayerActionService;
   
   // Common test data
@@ -64,9 +67,9 @@ describe('PlayerActionService', () => {
       numberRevealPoints: 10,
       mineHitPenalty: 100,
       lockoutDurationMs: 5000,
-        mineRevealDelayMs: 3000,
-        flagPlacePoints: 2,     // Points for placing a flag
-        flagRemovePoints: 0     // Points for removing a flag
+      mineRevealDelayMs: 3000,
+      flagPlacePoints: 2,     // Points for placing a flag
+      flagRemovePoints: 0     // Points for removing a flag
     },
     spatialGrid: {
       get: jest.fn(),
@@ -100,11 +103,23 @@ describe('PlayerActionService', () => {
       sendTilesUpdate: jest.fn()
     };
     
+    // Create proper Jest mock for ScoreService
+    mockScoreService = {
+      handleCellReveal: jest.fn(),
+      handleMineHit: jest.fn(),
+      handleFlagToggle: jest.fn()
+    } as unknown as jest.Mocked<ScoreService>;
+
+    // Set return values for the mock functions
+    mockScoreService.handleCellReveal.mockReturnValue(10); // Default return for single cell reveal
+    mockScoreService.handleMineHit.mockReturnValue(-100); // Default return for mine hit
+
     // Initialize the service with mocks
     playerActionService = new PlayerActionService(
       mockEventBus,
       mockGameStateService as any,
-      mockGameUpdateService as any
+      mockGameUpdateService as any,
+      mockScoreService
     );
   });
   
@@ -163,13 +178,11 @@ describe('PlayerActionService', () => {
         [revealedCell]
       );
       
-      // Check if score was updated (1 cell * 10 points)
-      expect(mockGameUpdateService.sendScoreUpdate).toHaveBeenCalledWith(
+      // Check if score service was called
+      expect(mockScoreService.handleCellReveal).toHaveBeenCalledWith(
         gameId,
         socketId,
-        10, // New score
-        10, // Score delta
-        'Reveal Cells'
+        [revealedCell]
       );
       
       // Check if tile update was sent
@@ -213,13 +226,10 @@ describe('PlayerActionService', () => {
         expect.any(Number) // lockoutUntil timestamp
       );
       
-      // Check if score was reduced by penalty amount
-      expect(mockGameUpdateService.sendScoreUpdate).toHaveBeenCalledWith(
+      // Check if score service was called
+      expect(mockScoreService.handleMineHit).toHaveBeenCalledWith(
         gameId,
-        socketId,
-        -100, // New score (0 - 100)
-        -100, // Score delta
-        'Hit Mine'
+        socketId
       );
       
       // Check if mine cell was updated
@@ -254,6 +264,7 @@ describe('PlayerActionService', () => {
       
       // Mock revealCell to return multiple cells (flood fill)
       mockedGridLogic.revealCell.mockResolvedValue(floodFillCells);
+      mockScoreService.handleCellReveal.mockReturnValue(50); // 5 cells * 10 points
       
       // Act
       await handleRevealTile({ gameId, socketId, x, y });
@@ -268,13 +279,11 @@ describe('PlayerActionService', () => {
         floodFillCells
       );
       
-      // Check if score was updated (5 cells * 10 points = 50)
-      expect(mockGameUpdateService.sendScoreUpdate).toHaveBeenCalledWith(
+      // Check if score service was called with all cells
+      expect(mockScoreService.handleCellReveal).toHaveBeenCalledWith(
         gameId,
         socketId,
-        50, // New score
-        50, // Score delta
-        'Reveal Cells'
+        floodFillCells
       );
       
       // Check if updates for all tiles were sent

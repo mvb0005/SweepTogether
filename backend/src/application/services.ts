@@ -4,6 +4,7 @@ import { SocketEventMap } from '../infrastructure/network/socketEvents';
 import { PlayerActionService } from './playerActionService';
 import { GameStateService } from './gameStateService';
 import { GameUpdateService } from './gameUpdateService';
+import { ScoreService } from './scoreService';
 
 // Instantiate shared infrastructure
 const eventBus = new InMemoryEventBus<SocketEventMap>();
@@ -11,13 +12,15 @@ const eventBus = new InMemoryEventBus<SocketEventMap>();
 // Instantiate application services
 const gameStateService = new GameStateService();
 const gameUpdateService = new GameUpdateService();
-const playerActionService = new PlayerActionService(eventBus, gameStateService, gameUpdateService);
+const scoreService = new ScoreService(eventBus, gameStateService, gameUpdateService);
+const playerActionService = new PlayerActionService(eventBus, gameStateService, gameUpdateService, scoreService);
 // Add more services here as needed
 
 export {
   eventBus,
     gameStateService,
     gameUpdateService,
+    scoreService,
   playerActionService,
   // Export other services here
 };

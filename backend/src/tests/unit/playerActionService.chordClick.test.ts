@@ -30,6 +30,7 @@
 import { PlayerActionService } from '../../application/playerActionService';
 import { GameStateService } from '../../application/gameStateService';
 import { GameUpdateService } from '../../application/gameUpdateService';
+import { ScoreService } from '../../application/scoreService';
 import { EventBus } from '../../infrastructure/eventBus/EventBus';
 import { SocketEventMap } from '../../infrastructure/network/socketEvents';
 import { Cell, GameState, PlayerStatus, Player } from '../../domain/types';
@@ -44,6 +45,7 @@ describe('PlayerActionService - Chord Click', () => {
   let mockEventBus: jest.Mocked<EventBus<SocketEventMap>>;
   let mockGameStateService: jest.Mocked<Partial<GameStateService>>;
   let mockGameUpdateService: jest.Mocked<Partial<GameUpdateService>>;
+    let mockScoreService: jest.Mocked<Partial<ScoreService>>;
   let playerActionService: PlayerActionService;
   
   // Common test data
@@ -103,12 +105,19 @@ describe('PlayerActionService - Chord Click', () => {
       sendTileUpdate: jest.fn(),
       sendTilesUpdate: jest.fn()
     };
-    
+
+      mockScoreService = {
+          handleCellReveal: jest.fn().mockReturnValue(30),
+          handleMineHit: jest.fn().mockReturnValue(-100),
+          handleFlagToggle: jest.fn()
+      };
+
     // Initialize the service with mocks
     playerActionService = new PlayerActionService(
       mockEventBus,
       mockGameStateService as any,
-      mockGameUpdateService as any
+        mockGameUpdateService as any,
+        mockScoreService as any
     );
   });
   
@@ -165,12 +174,11 @@ describe('PlayerActionService - Chord Click', () => {
         revealedCells
       );
       
-      // Check if score was updated (3 cells * 10 points = 30)
-      expect(mockGameUpdateService.sendScoreUpdate).toHaveBeenCalledWith(
+        // Check if score service was called
+        expect(mockScoreService.handleCellReveal).toHaveBeenCalledWith(
         gameId,
         socketId,
-        30, // New score
-        30, // Score delta
+          revealedCells,
         'Chord Click Reveal'
       );
       
@@ -215,12 +223,10 @@ describe('PlayerActionService - Chord Click', () => {
         expect.any(Number) // lockoutUntil timestamp
       );
       
-      // Check if score was reduced by penalty amount
-      expect(mockGameUpdateService.sendScoreUpdate).toHaveBeenCalledWith(
+        // Check if score service was called
+        expect(mockScoreService.handleMineHit).toHaveBeenCalledWith(
         gameId,
-        socketId,
-        -100, // New score (0 - 100)
-        -100, // Score delta
+          socketId,
         'Hit Mine (Chord Click)'
       );
       
@@ -257,7 +263,7 @@ describe('PlayerActionService - Chord Click', () => {
       
       // None of the update methods should be called
       expect(mockGameStateService.updateGridCells).not.toHaveBeenCalled();
-      expect(mockGameUpdateService.sendScoreUpdate).not.toHaveBeenCalled();
+        expect(mockScoreService.handleCellReveal).not.toHaveBeenCalled();
       expect(mockGameUpdateService.sendTilesUpdate).not.toHaveBeenCalled();
     });
     

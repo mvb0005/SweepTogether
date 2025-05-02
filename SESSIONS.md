@@ -73,3 +73,6 @@ Reorganized project documentation with consistent session numbering, individual 
 
 ## Session 23: [Implement handleChordClick](./prompts/SESSION_23_Implement_handleChordClick.md) (2025-05-02)
 Implemented chord click functionality in PlayerActionService with comprehensive unit tests, completing the trio of core player actions (reveal, flag, chord) with excellent test coverage.
+
+## Session 24: [Implement ScoreService](./prompts/SESSION_24_Implement_ScoreService.md) (2025-05-02)
+Implemented a dedicated ScoreService to centralize game scoring logic. The service handles scoring for revealing cells, hitting mines, and flag operations (placing/removing). Updated PlayerActionService to delegate all score-related operations to ScoreService. Comprehensive unit tests were added to ensure proper integration between services.

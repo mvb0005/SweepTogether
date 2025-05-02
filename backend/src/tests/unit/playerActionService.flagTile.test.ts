@@ -26,6 +26,7 @@
 import { PlayerActionService } from '../../application/playerActionService';
 import { GameStateService } from '../../application/gameStateService';
 import { GameUpdateService } from '../../application/gameUpdateService';
+import { ScoreService } from '../../application/scoreService';
 import { EventBus } from '../../infrastructure/eventBus/EventBus';
 import { SocketEventMap } from '../../infrastructure/network/socketEvents';
 import { Cell, GameState, PlayerStatus, Player } from '../../domain/types';
@@ -39,7 +40,8 @@ describe('PlayerActionService - Flag Tile', () => {
   // Mock objects
   let mockEventBus: jest.Mocked<EventBus<SocketEventMap>>;
   let mockGameStateService: jest.Mocked<Partial<GameStateService>>;
-  let mockGameUpdateService: jest.Mocked<Partial<GameUpdateService>>;
+    let mockGameUpdateService: jest.Mocked<GameUpdateService>;
+    let mockScoreService: jest.Mocked<Partial<ScoreService>>;
   let playerActionService: PlayerActionService;
   
   // Common test data
@@ -98,13 +100,26 @@ describe('PlayerActionService - Flag Tile', () => {
       sendScoreUpdate: jest.fn(),
       sendTileUpdate: jest.fn(),
       sendTilesUpdate: jest.fn()
+      } as unknown as jest.Mocked<GameUpdateService>;
+
+      // Create ScoreService mock with implementation that calls sendScoreUpdate
+      mockScoreService = {
+          handleCellReveal: jest.fn(),
+          handleMineHit: jest.fn(),
+          handleFlagToggle: jest.fn().mockImplementation((gameId, playerId, isPlacingFlag) => {
+              const scoreDelta = isPlacingFlag ? 2 : 0;
+              const reason = isPlacingFlag ? 'Place Flag' : 'Remove Flag';
+              mockGameUpdateService.sendScoreUpdate(gameId, playerId, scoreDelta, scoreDelta, reason);
+              return scoreDelta;
+          })
     };
     
     // Initialize the service with mocks
     playerActionService = new PlayerActionService(
-      mockEventBus,
+        mockEventBus as any,
       mockGameStateService as any,
-      mockGameUpdateService as any
+        mockGameUpdateService,
+        mockScoreService as any
     );
   });
   
@@ -163,6 +178,13 @@ describe('PlayerActionService - Flag Tile', () => {
         flaggedCell
       );
       
+        // Check if score service was called for placing a flag
+        expect(mockScoreService.handleFlagToggle).toHaveBeenCalledWith(
+            gameId,
+            socketId,
+            true // isPlacingFlag = true
+        );
+
       // Check if score was updated (flagPlacePoints: 2)
       expect(mockGameUpdateService.sendScoreUpdate).toHaveBeenCalledWith(
         gameId,
@@ -211,6 +233,13 @@ describe('PlayerActionService - Flag Tile', () => {
         unflaggedCell
       );
       
+        // Check if score service was called for removing a flag
+        expect(mockScoreService.handleFlagToggle).toHaveBeenCalledWith(
+            gameId,
+            socketId,
+            false // isPlacingFlag = false
+        );
+
       // Check if score was updated (flagRemovePoints: 0)
       expect(mockGameUpdateService.sendScoreUpdate).toHaveBeenCalledWith(
         gameId,
