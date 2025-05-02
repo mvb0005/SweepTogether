@@ -64,7 +64,9 @@ describe('PlayerActionService', () => {
       numberRevealPoints: 10,
       mineHitPenalty: 100,
       lockoutDurationMs: 5000,
-      mineRevealDelayMs: 3000
+        mineRevealDelayMs: 3000,
+        flagPlacePoints: 2,     // Points for placing a flag
+        flagRemovePoints: 0     // Points for removing a flag
     },
     spatialGrid: {
       get: jest.fn(),

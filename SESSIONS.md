@@ -384,3 +384,33 @@
 - Set up code coverage reporting to identify any coverage gaps
 
 **Outcome:** Created a comprehensive test suite for `PlayerActionService.handleRevealTile` with excellent code coverage, verifying all core functionality and edge cases. Left `handleFlagTile` and `handleChordClick` for future test sessions as they haven't been fully implemented yet.
+
+## Session 3: Implement handleFlagTile in PlayerActionService (2025-05-03)
+
+**Goal:** Implement the `handleFlagTile` functionality in `PlayerActionService` using the new infinite world logic.
+
+**Summary:**
+- Added `flagPlacePoints` and `flagRemovePoints` properties to the `ScoringConfig` interface in `types.ts`
+- Implemented the `handleFlagTile` method in `PlayerActionService`:
+  - Integrated with `gridLogic.toggleFlag` for the core flag toggling behavior
+  - Added proper validation of game state and player status
+  - Implemented persistence with `gameStateService.updateGridCell` 
+  - Added scoring calculation for flag placement and removal
+  - Sent appropriate updates via `gameUpdateService`
+- Created comprehensive test file at `playerActionService.flagTile.test.ts` with 8 test cases:
+  - Successfully flagging a cell
+  - Successfully unflagging a previously flagged cell
+  - Attempting to flag an already revealed cell
+  - Player lockout cases (active, locked, expired lockout)
+  - Error handling (game not found, player not found, error during toggleFlag)
+- Refactored the code to reduce duplication between action handlers:
+  - Extracted common validation logic into a reusable `validateAction` helper method
+  - Improved maintainability and readability
+  - Made it easier to implement future action handlers like `handleChordClick`
+
+**Decisions:**
+- Added new scoring properties to support flag actions
+- Used the same pattern as `handleRevealTile` for consistency
+- Extracted shared validation logic to reduce code duplication
+
+**Outcome:** Players can now flag and unflag cells with proper scoring and state updates. The code is well-structured for future expansion, particularly for implementing the `handleChordClick` functionality in a future session.

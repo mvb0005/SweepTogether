@@ -10,7 +10,7 @@ import { EventBus } from '../infrastructure/eventBus/EventBus';
 import { SocketEventMap } from '../infrastructure/network/socketEvents';
 import { GameStateService } from './gameStateService';
 import { GameUpdateService } from './gameUpdateService';
-import { PlayerStatus, Cell } from '../domain/types';
+import { PlayerStatus, Cell, GameState, Player } from '../domain/types';
 import * as gridLogic from '../domain/gridLogic';
 
 export class PlayerActionService {
@@ -24,30 +24,30 @@ export class PlayerActionService {
         this.eventBus.subscribe('chordClick', this.handleChordClick.bind(this));
     }
 
-    private async handleRevealTile(payload: SocketEventMap['revealTile']) {
-        console.log('[PlayerActionService] revealTile event:', payload);
-
-        const { gameId, socketId, x, y } = payload;
-
+    /**
+     * Validates common preconditions for player actions
+     * Returns the game state and player if valid, or null if invalid
+     */
+    private validateAction(gameId: string, socketId: string): { gameState: GameState, player: Player } | null {
         // 1. Get game state
         const gameState = this.gameStateService.getGame(gameId);
         if (!gameState) {
             console.error(`Game ${gameId} not found.`);
             this.gameUpdateService.sendError(socketId, 'Game not found.');
-            return;
+            return null;
         }
 
         // 2. Validate game state
         if (gameState.gameOver) {
             console.log(`Game ${gameId} is already over.`);
-            return;
+            return null;
         }
 
         // 3. Get player from state
         const player = gameState.players[socketId];
         if (!player) {
             console.error(`Player ${socketId} not found in game ${gameId}.`);
-            return;
+            return null;
         }
 
         // 4. Check if player is locked out
@@ -55,7 +55,7 @@ export class PlayerActionService {
             const now = Date.now();
             if (!player.lockedUntil || now < player.lockedUntil) {
                 console.log(`Player ${socketId} is locked out.`);
-                return;
+                return null;
             }
             // Player lockout has expired, reset status
             player.status = PlayerStatus.ACTIVE;
@@ -68,6 +68,19 @@ export class PlayerActionService {
                 PlayerStatus.ACTIVE
             );
         }
+
+        return { gameState, player };
+    }
+
+    private async handleRevealTile(payload: SocketEventMap['revealTile']) {
+        console.log('[PlayerActionService] revealTile event:', payload);
+
+        const { gameId, socketId, x, y } = payload;
+
+        const validationResult = this.validateAction(gameId, socketId);
+        if (!validationResult) return;
+
+        const { gameState, player } = validationResult;
 
         // 5. Call revealCell from gridLogic
         try {
@@ -170,9 +183,81 @@ export class PlayerActionService {
         }
     }
 
-    private handleFlagTile(payload: SocketEventMap['flagTile']) {
+    private async handleFlagTile(payload: SocketEventMap['flagTile']) {
         console.log('[PlayerActionService] flagTile event:', payload);
-        // TODO: Implement flag logic using gridLogic.toggleFlag (will be done in a future session)
+
+        const { gameId, socketId, x, y } = payload;
+
+        const validationResult = this.validateAction(gameId, socketId);
+        if (!validationResult) return;
+
+        const { gameState, player } = validationResult;
+
+        // 5. Call toggleFlag from gridLogic
+        try {
+            const updatedCell = await gridLogic.toggleFlag(
+                gameState,
+                x,
+                y,
+                this.gameStateService.getCell
+            );
+
+            // 6. Handle result
+            if (!updatedCell) {
+                // No change occurred (already revealed cell or invalid coordinates)
+                console.log(`No change occurred when flagging at (${x},${y})`);
+                return;
+            }
+
+            // Persist the updated cell state
+            this.gameStateService.updateGridCell(gameId, updatedCell);
+
+            // Calculate score change based on flag action
+            let scoreDelta = 0;
+            let reason = '';
+
+            if (updatedCell.flagged) {
+                // Added a flag
+                scoreDelta = gameState.scoringConfig.flagPlacePoints;
+                reason = 'Place Flag';
+            } else {
+                // Removed a flag
+                scoreDelta = gameState.scoringConfig.flagRemovePoints;
+                reason = 'Remove Flag';
+            }
+
+            // Update player score
+            player.score += scoreDelta;
+
+            // Send updates to clients
+
+            // 1. Score update
+            this.gameUpdateService.sendScoreUpdate(
+                gameId,
+                socketId,
+                player.score,
+                scoreDelta,
+                reason
+            );
+
+            // 2. Tile update for the flagged/unflagged cell
+            this.gameUpdateService.sendTileUpdate(
+                gameId,
+                {
+                    x: updatedCell.x,
+                    y: updatedCell.y,
+                    revealed: updatedCell.revealed,
+                    flagged: updatedCell.flagged,
+                    // Include adjacentMines only if revealed
+                    ...(updatedCell.revealed ? { adjacentMines: updatedCell.adjacentMines } : {})
+                }
+            );
+
+            console.log(`Player ${socketId} ${updatedCell.flagged ? 'flagged' : 'unflagged'} cell at (${x},${y}).`);
+        } catch (error) {
+            console.error('Error flagging cell:', error);
+            this.gameUpdateService.sendError(socketId, 'Failed to flag tile');
+        }
     }
 
     private handleChordClick(payload: SocketEventMap['chordClick']) {

@@ -60,6 +60,8 @@ export const DEFAULT_SCORING_CONFIG = {
   mineHitPenalty: 10,
   lockoutDurationMs: 5000, // 5 seconds
   mineRevealDelayMs: 3000, // 3 seconds
+  flagPlacePoints: 2,      // Points for placing a flag
+  flagRemovePoints: 0,     // Points for removing a flag
 };
 
 export interface ScoringConfig {
@@ -70,6 +72,8 @@ export interface ScoringConfig {
   mineHitPenalty: number;
   lockoutDurationMs: number;
   mineRevealDelayMs: number;
+  flagPlacePoints: number; // Points awarded for placing a flag
+  flagRemovePoints: number; // Points awarded for removing a flag (can be 0)
 }
 
 // --- Player State ---
