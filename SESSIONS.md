@@ -304,3 +304,21 @@
     *   Modified `backend/server.ts` to connect to MongoDB on startup and disconnect gracefully on shutdown.
     *   Discussed refactoring the backend to better support the infinite board model and targeted updates.
 *   **Next Steps:** Refactor backend types (`types.ts`), game logic (`game.ts`), and socket handlers (`socketHandlers.ts`) to use `SpatialHashGrid` and integrate database persistence.
+
+# Session: 2025-05-02 (Event-Driven Refactor & Service Bootstrap)
+
+* **Goal:** Refactor backend to use a type-safe, event-driven architecture and introduce a service bootstrap pattern for future extensibility.
+* **Summary:**
+    * Implemented a generic, strongly-typed EventBus and InMemoryEventBus.
+    * Refactored socketHandlers to publish events to the EventBus and allow services to subscribe.
+    * Added PlayerActionService as an example event-driven service, logging player actions.
+    * Created a bootstrap file to instantiate and export singleton services and infrastructure.
+    * Updated Dockerfile and dev workflow for reliability.
+    * Added and improved unit/integration tests for the event bus and socket handler, including real socket tests.
+    * Discussed and implemented best practices for service instantiation and dependency management.
+* **Next Steps:**
+    * Begin implementing real game logic in event-driven services.
+    * Continue refactoring for infinite world support and viewport-based updates.
+    * Expand tests and error handling as new features are added.
+
+---

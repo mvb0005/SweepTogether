@@ -1,5 +1,14 @@
 # Multiplayer Minesweeper TODO
 
+## Event-Driven Refactor & Service Bootstrap (2025-05-02)
+
+- Refactored backend to use a type-safe, event-driven architecture (EventBus, InMemoryEventBus).
+- Refactored socketHandlers to publish events to the EventBus and allow services to subscribe.
+- Added PlayerActionService as an event-driven service (currently logs actions).
+- Created a bootstrap file for singleton service instantiation and dependency management.
+- Improved Dockerfile/dev workflow and added robust unit/integration tests for event bus and socket handler.
+- Next: Implement real game logic in event-driven services, continue infinite world refactor, expand tests and error handling.
+
 ## Outstanding Requirements & Tasks
 
 *   **Persistence:**

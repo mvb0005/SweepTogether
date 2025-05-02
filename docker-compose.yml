@@ -8,7 +8,7 @@ services:
     volumes:
       - ./backend:/usr/src/app # Mount backend code
       - /usr/src/app/node_modules # Keep container's node_modules
-    command: npx nodemon --watch src --ext ts --exec 'ts-node' src/server.ts
+    command: npx nodemon --legacy-watch --watch src --ext ts --exec 'ts-node' src/infrastructure/network/server.ts
     environment:
       - NODE_ENV=development
       # Updated MongoDB connection string
