@@ -120,6 +120,7 @@ const Board: React.FC<BoardProps> = ({
             onReveal={() => onRevealCell(worldCoords.x, worldCoords.y)}
             onFlag={() => onFlagCell(worldCoords.x, worldCoords.y)}
             onChord={() => onChordCell(worldCoords.x, worldCoords.y)}
+            onDoubleClick={() => handleDoubleClick(row, col)} // Add onDoubleClick prop
             isLocked={isPlayerLocked}
           />
         );
