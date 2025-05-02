@@ -11,9 +11,12 @@ services:
     command: npx nodemon --watch src --ext ts --exec 'ts-node' src/server.ts
     environment:
       - NODE_ENV=development
-      # - DATABASE_URL=postgresql://user:password@db:5432/minesweeper
+      # Updated MongoDB connection string
+      - MONGODB_URI=mongodb://mongo_user:mongo_password@mongo:27017/minesweeper_infinite?authSource=admin
+      - DB_NAME=minesweeper_infinite
     depends_on:
-      - db
+      # Changed dependency from db to mongo
+      - mongo
     networks:
       - minesweeper-net
 
@@ -54,16 +57,16 @@ services:
       - minesweeper-net
     restart: unless-stopped
 
-  db:
-    image: postgres:14-alpine
+  mongo:
+    image: mongo:latest # Use official MongoDB image
     environment:
-      POSTGRES_DB: minesweeper
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      MONGO_INITDB_ROOT_USERNAME: mongo_user # Example user
+      MONGO_INITDB_ROOT_PASSWORD: mongo_password # Example password
+      MONGO_INITDB_DATABASE: minesweeper_infinite # Database to initialize
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mongo_data:/data/db # Persist MongoDB data
     ports:
-      - "5432:5432"
+      - "27017:27017" # Expose MongoDB port
     networks:
       - minesweeper-net
 
@@ -86,7 +89,7 @@ services:
     command: npx cypress run --browser chrome --headless
 
 volumes:
-  postgres_data:
+  mongo_data:
 
 networks:
   minesweeper-net:

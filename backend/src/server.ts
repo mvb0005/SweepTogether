@@ -6,6 +6,7 @@ import path from 'path';
 // Import from our modular files
 import { GameConfig } from './types';
 import { setupSocketHandlers, games, pendingGameConfigs } from './socketHandlers';
+import { connectToDatabase, disconnectFromDatabase } from './db'; // Import DB functions
 
 const app = express();
 
@@ -23,7 +24,8 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
-// --- Game Configuration Endpoint ---
+// --- Game Configuration Endpoint (Needs refactoring for infinite board) ---
+// TODO: Refactor this endpoint to handle infinite board config (e.g., initial viewport)
 app.post('/configure/:gameId', (req: Request, res: Response, next: NextFunction): void => {
     try {
         const { gameId } = req.params;
@@ -140,11 +142,10 @@ app.post('/configure/:gameId', (req: Request, res: Response, next: NextFunction)
         }
 
         // 6. Store the validated configuration
+        const tempInitialViewport = { centerX: 0, centerY: 0, width: 30, height: 20 }; // Example
         const finalConfig: GameConfig = {
-            rows: config.rows,
-            cols: config.cols,
-            mines: config.mines,
-            mineLocations: validatedMineLocations // Use the validated locations
+            initialViewport: tempInitialViewport, // Use viewport
+            mineLocations: validatedMineLocations // Keep for fixed mode if supported
         };
 
         console.log(`Storing pending configuration for game ${gameId}:`, finalConfig);
@@ -163,10 +164,41 @@ io.on('connection', (socket) => {
     setupSocketHandlers(io, socket);
 });
 
-// Start the server
-server.listen(PORT, () => {
-  console.log(`Server listening on *:${PORT}`);
-});
+// --- Start Server Function ---
+async function startServer() {
+    try {
+        // Connect to the database before starting the server
+        await connectToDatabase();
+
+        // Start the HTTP server
+        server.listen(PORT, () => {
+            console.log(`Server listening on *:${PORT}`);
+        });
+
+        // Graceful shutdown
+        const shutdown = async (signal: string) => {
+            console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+            server.close(async () => {
+                console.log('HTTP server closed.');
+                await disconnectFromDatabase();
+                process.exit(0);
+            });
+            // Force shutdown after timeout
+            setTimeout(async () => {
+                console.error('Could not close connections in time, forcing shutdown');
+                await disconnectFromDatabase(); // Attempt disconnect even on forced shutdown
+                process.exit(1);
+            }, 10000); // 10 seconds timeout
+        };
+
+        process.on('SIGTERM', () => shutdown('SIGTERM'));
+        process.on('SIGINT', () => shutdown('SIGINT')); // Catches Ctrl+C
+
+    } catch (error) {
+        console.error("Failed to start server:", error);
+        process.exit(1);
+    }
+}
 
 // Basic Error Handling
 const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
@@ -175,3 +207,6 @@ const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
 };
 
 app.use(errorHandler);
+
+// --- Run the Server --- 
+startServer();
