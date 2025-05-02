@@ -41,7 +41,32 @@
 - Use async/await for asynchronous operations.
 - Add unit tests for new domain/service logic.
 
-## 7. Agent Personas
+## 7. Testing Guidelines & Best Practices
+
+- **Unit Test Structure:**
+  - Document test scenarios at the top of each test file for better readability
+  - Follow the AAA pattern (Arrange, Act, Assert) in individual test cases
+  - Group related tests with descriptive `describe` blocks
+  - Use clear test names that explain the expected behavior
+
+- **Code Coverage:**
+  - Run tests with coverage using `cd backend && npm test -- --coverage`
+  - Target 90% statement coverage and 80% branch coverage for critical code
+  - Use HTML reports in `backend/coverage/lcov-report/index.html` for detailed analysis
+  - Don't chase coverage blindly - focus on meaningful test cases
+
+- **Mocking Best Practices:**
+  - Mock external dependencies (services, databases) but not the code under test
+  - For event-driven services, extract handler functions through mock subscription calls
+  - Verify behavior through function calls and parameters, not implementation details
+  - Reset mocks between tests with `jest.clearAllMocks()` to prevent test pollution
+
+- **Jest Commands:**
+  - Run specific tests: `npm test -- --testPathPattern=filename.test.ts`
+  - Run tests in watch mode: `npm test -- --watch`
+  - Update snapshots: `npm test -- -u`
+
+## 8. Agent Personas
 
 Select the appropriate persona file based on the task. The **Prompt Engineering Expert** can be used to generate detailed prompts for other personas.
 
@@ -52,7 +77,7 @@ Select the appropriate persona file based on the task. The **Prompt Engineering 
 - [Persistence Expert](./agent_personas/persistence_expert.md)
 - [DevOps Engineer](./agent_personas/devops_engineer.md)
 
-## 8. Collaboration Workflow (Session-Based)
+## 9. Collaboration Workflow (Session-Based)
 
 We use a structured, session-based workflow to track progress and maintain context. Refer to `PLANNING.md` for the overall project roadmap.
 
