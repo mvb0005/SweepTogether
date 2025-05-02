@@ -16,6 +16,7 @@ export interface GameConfig {
     cols: number;
     mines: number;
     mineLocations?: { row: number, col: number }[]; // Optional predefined mine locations
+  isInfiniteWorld?: boolean; // Flag to indicate infinite world mode
 }
 
 /**
@@ -30,9 +31,35 @@ export interface ClientCell {
 }
 
 /**
+ * Coordinates for the infinite world mode
+ */
+export interface Coordinates {
+  x: number;
+  y: number;
+}
+
+/**
+ * Viewport state for tracking player's view in infinite world
+ */
+export interface ViewportState {
+  center: Coordinates;
+  width: number;
+  height: number;
+  zoom: number;
+}
+
+/**
  * Represents the game board as a 2D array of Cells.
  */
 export type Board = Cell[][];
+
+/**
+ * For infinite world, we use a sparse collection of revealed/flagged cells
+ * keyed by coordinate string "x,y"
+ */
+export interface InfiniteWorldState {
+  cells: Map<string, Cell>; // Stores only cells that have been interacted with
+}
 
 /**
  * Configuration for game scoring and penalties.
@@ -73,6 +100,7 @@ export interface Player {
   username?: string; // Optional username
   status: PlayerStatus;
   lockedUntil?: number; // Timestamp when lockout ends (if locked)
+  viewport?: ViewportState; // Player's current view in infinite world mode
 }
 
 /**
@@ -86,8 +114,11 @@ export interface Players {
  * Represents a player's contribution to revealing a mine.
  */
 export interface MineReveal {
-  row: number;
-  col: number;
+  // For infinite world, we use x, y instead of row, col
+  x?: number;
+  y?: number;
+  row?: number;
+  col?: number;
   players: {
     playerId: string;
     position: number; // 1 for first, 2 for second, 3 for third
@@ -106,25 +137,55 @@ export interface GameState {
     boardConfig: GameConfig;
     scoringConfig: ScoringConfig;
     mineReveals: MineReveal[]; // Track progress on each mine's reveal
-    pendingReveals: {row: number, col: number}[]; // Mines waiting to be revealed
+  pendingReveals: { row?: number, col?: number, x?: number, y?: number }[]; // Mines waiting to be revealed
     gameOver: boolean;
     winner?: string;
+
+  // For infinite world mode:
+  infiniteWorldState?: InfiniteWorldState;
 }
 
 /**
  * Represents the data structure for revealing a tile.
  */
 export interface RevealTilePayload {
-    row: number;
-    col: number;
+  row?: number;
+  col?: number;
+  // For infinite world:
+  x?: number;
+  y?: number;
 }
 
 /**
  * Represents the data structure for flagging a tile.
  */
 export interface FlagTilePayload {
-    row: number;
-    col: number;
+  row?: number;
+  col?: number;
+  // For infinite world:
+  x?: number;
+  y?: number;
+}
+
+/**
+ * Represents the data structure for chord clicking.
+ */
+export interface ChordClickPayload {
+  row?: number;
+  col?: number;
+  // For infinite world:
+  x?: number;
+  y?: number;
+}
+
+/**
+ * Represents the payload for updating a player's viewport.
+ */
+export interface ViewportUpdatePayload {
+  center: Coordinates;
+  width: number;
+  height: number;
+  zoom: number;
 }
 
 /**
@@ -139,10 +200,11 @@ export interface GameStatePayload {
     boardState: ClientCell[][];
     boardConfig: GameConfig;
     players: Players;
-    pendingReveals: {row: number, col: number}[]; // Mines with pending revelation
+  pendingReveals: { row?: number, col?: number, x?: number, y?: number }[]; // Mines with pending revelation
     gameOver: boolean;
     winner?: string;
     message?: string; // Optional message (e.g., game over reason)
+  playerId?: string; // Player's own ID
 }
 
 /**
@@ -165,11 +227,21 @@ export interface PlayerStatusUpdatePayload {
 }
 
 /**
+ * Represents the payload for the 'playerViewportUpdate' event sent to clients.
+ */
+export interface PlayerViewportUpdatePayload {
+  playerId: string;
+  viewport: ViewportState;
+}
+
+/**
  * Represents the payload for the 'mineRevealed' event sent to clients.
  */
 export interface MineRevealedPayload {
-  row: number;
-  col: number;
+  row?: number;
+  col?: number;
+  x?: number;
+  y?: number;
   revealedBy: {
     playerId: string;
     position: number;

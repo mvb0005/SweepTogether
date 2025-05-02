@@ -7,6 +7,19 @@ export interface CellState {
   adjacentMines?: number; // Using same property name as backend
 }
 
+// Adding coordinate types for infinite world mode
+export interface Coordinates {
+  x: number;
+  y: number;
+}
+
+export interface ViewportState {
+  center: Coordinates;
+  width: number;  // Viewport width in cells
+  height: number; // Viewport height in cells
+  zoom: number;   // For future zooming capability
+}
+
 export type BoardState = CellState[][];
 
 export interface Player {
@@ -16,6 +29,7 @@ export interface Player {
   isLocked?: boolean;
   lockedUntil?: number; // Timestamp
   status?: string; // Player status from backend (ACTIVE, LOCKED_OUT, etc.)
+  viewport?: ViewportState; // Add viewport information to player
 }
 
 export interface LeaderboardEntry {

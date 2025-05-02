@@ -1,5 +1,6 @@
 import { Board, Cell, ClientCell, GameConfig, GameState, MineReveal, Player, PlayerStatus, Players, ScoringConfig } from './types';
 import { calculateAdjacentMines, createBoardWithFixedMines, generateBoard } from './board';
+import { initializeWorldGenerator } from './worldGenerator'; // Import the initializer
 
 /**
  * Default scoring configuration values.
@@ -45,6 +46,7 @@ export function getBoardStateForClient(currentBoard: Board): ClientCell[][] {
 
 /**
  * Creates a new game state with the given configuration.
+ * Initializes the infinite world generator with the game ID as the seed.
  * 
  * @param gameId - The ID of the game
  * @param config - The configuration for the game
@@ -56,9 +58,13 @@ export function createGame(
   config: GameConfig, 
   scoringConfig: Partial<ScoringConfig> = {}
 ): GameState {
+  // Initialize the infinite world generator with the gameId as the seed
+  // This ensures any logic using the infinite generator is seeded correctly for this game
+  initializeWorldGenerator(gameId);
+
   const board = config.mineLocations
     ? createBoardWithFixedMines(config)
-    : generateBoard(config.rows, config.cols, config.mines);
+    : generateBoard(config.rows, config.cols);
   
   // Merge default scoring config with any provided custom values
   const finalScoringConfig: ScoringConfig = {
@@ -338,7 +344,10 @@ export function processReadyMineReveals(gameState: GameState): MineReveal[] {
       
       // Mark the mine as revealed on the board
       const { row, col } = mineReveal;
-      if (gameState.board[row] && gameState.board[row][col]) {
+
+      // Make sure row and col exist and are in bounds before accessing
+      if (typeof row === 'number' && typeof col === 'number' &&
+        gameState.board[row] && gameState.board[row][col]) {
         gameState.board[row][col].revealed = true;
       }
       

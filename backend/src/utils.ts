@@ -18,7 +18,7 @@ const animals = [
   'Koala', 'Raccoon', 'Elephant', 'Giraffe', 'Lion', 'Monkey', 'Squirrel',
   'Kangaroo', 'Hedgehog', 'Octopus', 'Chameleon', 'Panther', 'Flamingo',
   'Narwhal', 'Unicorn', 'Dragon', 'Phoenix', 'Sloth', 'Otter', 'Llama',
-  'Walrus', 'Badger', 'Platypus', 'Wombat', 'Axolotl', 'Capybara'
+  'Walrus', 'Badger', 'Platypus', 'Wombat', 'Axolotl', 'Capybara', 'Dolphin',
 ];
 
 /**

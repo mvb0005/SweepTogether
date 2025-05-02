@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSocket } from './hooks/useSocket';
-import Board from './components/Board'; // Import the Board component
+import { useViewport } from './hooks/useViewport'; // Import our new hook
+import Board from './components/Board';
 import {
   BoardState,
   Player,
@@ -12,7 +13,8 @@ import {
   PlayerUnlockPayload,
   UpdateLeaderboardPayload,
   GameJoinedPayload,
-  GameStatePayload
+  GameStatePayload,
+  ViewportState
 } from './types';
 
 function App() {
@@ -24,35 +26,79 @@ function App() {
   const [isGameOver, setIsGameOver] = useState<boolean>(false);
   const [winner, setWinner] = useState<string | undefined | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
+  
+  // Get viewport dimensions based on window size
+  const calculateInitialViewport = () => {
+    const cellSize = 30; // px per cell
+    const width = Math.floor((window.innerWidth * 0.8) / cellSize);
+    const height = Math.floor((window.innerHeight * 0.8) / cellSize);
+    return { width, height };
+  };
+  
+  const initialDimensions = calculateInitialViewport();
+
+  // Viewport management with our custom hook
+  const { 
+    viewport, 
+    handlePanStart, 
+    handlePanMove, 
+    handlePanEnd,
+    setCenterPosition
+  } = useViewport({
+    initialWidth: initialDimensions.width,
+    initialHeight: initialDimensions.height,
+    onViewportChange: (newViewport) => {
+      // Send viewport updates to server when it changes
+      if (socket && isConnected && playerId) {
+        socket.emit('updateViewport', {
+          center: newViewport.center,
+          width: newViewport.width,
+          height: newViewport.height,
+          zoom: newViewport.zoom
+        });
+      }
+    }
+  });
 
   // Determine if the current player is locked
   const isPlayerLocked = playerId ? players[playerId]?.isLocked ?? false : false;
 
   // --- Event Handlers for Board Interaction ---
-  const handleRevealCell = (row: number, col: number) => {
+  const handleRevealCell = (worldX: number, worldY: number) => {
     if (socket && isConnected && !isPlayerLocked && !isGameOver) {
-      console.log(`Sending revealTile event for cell: (${row}, ${col})`);
-      socket.emit('revealTile', { row, col });
+      console.log(`Sending revealTile event for cell: (${worldX}, ${worldY})`);
+      socket.emit('revealTile', { x: worldX, y: worldY });
     } else {
       console.log('Cannot reveal: Socket not connected, player locked, or game over.');
     }
   };
 
-  const handleFlagCell = (row: number, col: number) => {
+  const handleFlagCell = (worldX: number, worldY: number) => {
     if (socket && isConnected && !isPlayerLocked && !isGameOver) {
-      console.log(`Sending flagTile event for cell: (${row}, ${col})`);
-      socket.emit('flagTile', { row, col });
+      console.log(`Sending flagTile event for cell: (${worldX}, ${worldY})`);
+      socket.emit('flagTile', { x: worldX, y: worldY });
     } else {
       console.log('Cannot flag: Socket not connected, player locked, or game over.');
     }
   };
 
-  const handleChordCell = (row: number, col: number) => {
+  const handleChordCell = (worldX: number, worldY: number) => {
     if (socket && isConnected && !isPlayerLocked && !isGameOver) {
-      console.log(`Sending chordClick event for cell: (${row}, ${col})`);
-      socket.emit('chordClick', { row, col });
+      console.log(`Sending chordClick event for cell: (${worldX}, ${worldY})`);
+      socket.emit('chordClick', { x: worldX, y: worldY });
     } else {
       console.log('Cannot chord: Socket not connected, player locked, or game over.');
+    }
+  };
+
+  // Handle navigation to another player's position
+  const handleNavigateToPlayer = (targetPlayerId: string) => {
+    const targetPlayer = players[targetPlayerId];
+    if (targetPlayer && targetPlayer.viewport) {
+      setCenterPosition(
+        targetPlayer.viewport.center.x,
+        targetPlayer.viewport.center.y
+      );
     }
   };
 
@@ -73,41 +119,51 @@ function App() {
     }
   }, []);
 
+  // Main socket connection and event handlers
   useEffect(() => {
     if (socket && isConnected && gameId) {
       console.log(`Socket connected, attempting to join game: ${gameId}`);
       socket.emit('joinGame', gameId);
-
-      // Set up event listeners
+      
+      // Socket event handlers
       const handleGameState = (data: GameStatePayload) => {
-        console.log('Game state received!', data);
-        setPlayerId(data.playerId || socket.id);
+        console.log('Received game state update', data);
+        
+        // Set player ID if it was included in the response
+        if (data.playerId) {
+          setPlayerId(data.playerId);
+        }
+        
+        // Update board if it exists in the payload
         if (data.boardState) {
-          console.log('Setting initial board state:', data.boardState);
+          console.log('Setting board state from game state event');
           setBoard(data.boardState);
         }
+        
+        // Update players if they exist in the payload
         if (data.players) {
-          console.log('Setting players:', data.players);
           setPlayers(data.players);
         }
-        if (data.message) {
-          console.log('Server message:', data.message);
+        
+        // Update game over state
+        if (data.gameOver !== undefined) {
+          setIsGameOver(data.gameOver);
         }
-        setIsGameOver(data.gameOver || false);
-        setWinner(data.winner);
+        
+        // Update winner if it exists
+        if (data.winner !== undefined) {
+          setWinner(data.winner);
+        }
       };
-
+      
       const handleUpdateBoard = (data: UpdateBoardPayload) => {
-        console.log('Received board update');
+        console.log('Received board update', data);
         setBoard(data.board);
       };
 
       const handleUpdatePlayers = (data: UpdatePlayersPayload) => {
-        console.log('Received player update', data.players);
+        console.log('Received players update', data.players);
         setPlayers(data.players);
-        if (!playerId && socket.id && data.players[socket.id]) {
-            setPlayerId(socket.id);
-        }
       };
 
       const handleUpdateLeaderboard = (data: UpdateLeaderboardPayload) => {
@@ -145,6 +201,25 @@ function App() {
         }));
       };
 
+      // Handle viewport updates for other players
+      const handlePlayerViewportUpdate = (data: { playerId: string, viewport: ViewportState }) => {
+        console.log(`Player ${data.playerId} viewport updated:`, data.viewport);
+        setPlayers(prev => ({
+          ...prev,
+          ...(prev[data.playerId] && {
+            [data.playerId]: { ...prev[data.playerId], viewport: data.viewport }
+          })
+        }));
+      };
+
+      // Handler for viewport-specific board updates
+      const handleViewportBoardUpdate = (data: { boardState: BoardState, center: { x: number, y: number } }) => {
+        console.log('Received viewport board update for center:', data.center);
+        if (data.boardState) {
+          setBoard(data.boardState);
+        }
+      };
+
       // Register event handlers
       socket.on('gameState', handleGameState);
       socket.on('updateBoard', handleUpdateBoard);
@@ -153,6 +228,8 @@ function App() {
       socket.on('gameOver', handleGameOver);
       socket.on('playerLocked', handlePlayerLocked);
       socket.on('playerUnlocked', handlePlayerUnlocked);
+      socket.on('playerViewportUpdate', handlePlayerViewportUpdate);
+      socket.on('viewportUpdate', handleViewportBoardUpdate);
 
       return () => {
         console.log('Removing socket listeners...');
@@ -163,61 +240,107 @@ function App() {
         socket.off('gameOver', handleGameOver);
         socket.off('playerLocked', handlePlayerLocked);
         socket.off('playerUnlocked', handlePlayerUnlocked);
+        socket.off('playerViewportUpdate', handlePlayerViewportUpdate);
+        socket.off('viewportUpdate', handleViewportBoardUpdate);
       };
     }
   }, [socket, isConnected, gameId, playerId]);
 
+  // Separate effect for sending viewport updates with debounce
+  const [viewportUpdateTimeout, setViewportUpdateTimeout] = useState<NodeJS.Timeout | null>(null);
+  
+  useEffect(() => {
+    // Only send viewport updates if we're connected and have a player ID
+    if (socket && isConnected && playerId) {
+      // Clear any pending timeout to debounce rapid viewport changes
+      if (viewportUpdateTimeout) {
+        clearTimeout(viewportUpdateTimeout);
+      }
+      
+      // Set a new timeout to send viewport update after a short delay
+      const timeout = setTimeout(() => {
+        console.log('Sending viewport update:', viewport);
+        socket.emit('updateViewport', {
+          center: viewport.center,
+          width: viewport.width,
+          height: viewport.height,
+          zoom: viewport.zoom
+        });
+      }, 100); // Debounce for 100ms
+      
+      setViewportUpdateTimeout(timeout);
+      
+      return () => {
+        if (viewportUpdateTimeout) {
+          clearTimeout(viewportUpdateTimeout);
+        }
+      };
+    }
+  }, [viewport, socket, isConnected, playerId]);
+
+  // --- Render Player List ---
+  const renderPlayerList = () => {
+    return (
+      <div className="player-list">
+        <h3>Players</h3>
+        <ul>
+          {Object.entries(players).map(([id, player]) => (
+            <li 
+              key={id} 
+              className={id === playerId ? 'current-player' : ''}
+              onClick={() => id !== playerId && handleNavigateToPlayer(id)}
+              style={{ cursor: id !== playerId ? 'pointer' : 'default' }}
+            >
+              {player.username || id.slice(0, 6)} - Score: {player.score}
+              {player.isLocked && <span className="locked-badge"> LOCKED</span>}
+              {id === playerId && <span className="you-badge"> (You)</span>}
+            </li>
+          ))}
+        </ul>
+        {Object.keys(players).length === 0 && <p>No players connected</p>}
+      </div>
+    );
+  };
+
   // --- Render ---
   return (
-    <div>
-      <h1>Multiplayer Minesweeper</h1>
-      <p>Status: {isConnected ? 'Connected' : 'Disconnected'}</p>
-      {isConnected && playerId && <p>Your Player ID: {playerId}</p>}
-      {isConnected && gameId && <p>Game ID: {gameId}</p>}
+    <div className="app-container">
+      <h1>Infinite Minesweeper</h1>
+      <div className="status-bar">
+        <div>Status: {isConnected ? 'Connected' : 'Disconnected'}</div>
+        {isConnected && playerId && <div>Your Player ID: {playerId}</div>}
+        {isConnected && gameId && <div>Game ID: {gameId}</div>}
+      </div>
+      
       {isGameOver && (
-        <h2>Game Over! {winner ? `Winner: ${players[winner]?.username || winner}` : 'No winner.'}</h2>
+        <h2 className="game-over-banner">
+          Game Over! {winner ? `Winner: ${players[winner]?.username || winner}` : 'No winner.'}
+        </h2>
       )}
+      
       {isPlayerLocked && (
-        <p style={{ color: 'red', fontWeight: 'bold' }}>
+        <p className="locked-message">
           You are locked out! Wait until {new Date(players[playerId!]?.lockedUntil!).toLocaleTimeString()}
         </p>
       )}
-      <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
-        <div>
-          <h2>Board</h2>
-          {/* Render the Board component */}
-          <Board
+      
+      <div className="game-container">
+        <div className="sidebar">
+          {renderPlayerList()}
+        </div>
+        
+        <div className="main-content">
+          <Board 
             boardData={board}
             onRevealCell={handleRevealCell}
             onFlagCell={handleFlagCell}
             onChordCell={handleChordCell}
             isPlayerLocked={isPlayerLocked}
+            viewport={viewport}
+            onPanStart={handlePanStart}
+            onPanMove={handlePanMove}
+            onPanEnd={handlePanEnd}
           />
-        </div>
-        <div>
-          <h2>Players</h2>
-          {/* Placeholder for PlayerList component */}
-          <ul>
-            {Object.values(players).map(p => (
-              <li key={p.id} style={{ color: p.isLocked ? 'grey' : 'inherit' }}>
-                {p.username || p.id.substring(0, 6)}
-                (Score: {p.score})
-                {p.isLocked ? ` (Locked until ${new Date(p.lockedUntil!).toLocaleTimeString()})` : ''}
-                {p.id === playerId ? <strong> (You)</strong> : ''}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <h2>Leaderboard</h2>
-          {/* Placeholder for Leaderboard component */}
-          <ol>
-            {leaderboard.map((entry, index) => (
-              <li key={entry.playerId || index}>
-                {entry.username || entry.playerId.substring(0, 6)}: {entry.score}
-              </li>
-            ))}
-          </ol>
         </div>
       </div>
     </div>

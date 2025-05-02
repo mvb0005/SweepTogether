@@ -1,14 +1,11 @@
-import { createNoise2D } from 'simplex-noise';
-import seedrandom from 'seedrandom';
+import { createNoise2D } from 'simplex-noise'; // Removed Noise2D import
+import seedrandom, { PRNG } from 'seedrandom';
 
-// TODO: Make seed configurable, perhaps environment variable or persistent storage
-const WORLD_SEED = 'minesweeper-infinite';
-
-// Create a seeded random number generator
-const rng = seedrandom(WORLD_SEED);
-
-// Pass the seeded RNG to createNoise2D
-const noise2D = createNoise2D(rng);
+// Variables to hold the seeded generator and noise function
+// These will be initialized by initializeWorldGenerator
+let rng: PRNG;
+// Use the function signature type directly
+let noise2D: (x: number, y: number) => number;
 
 // TODO: Make density configurable
 const MINE_DENSITY_THRESHOLD = 0.85; // Adjust this value (0 to 1). Higher = fewer mines.
@@ -23,6 +20,20 @@ const cellValueCache = new Map<string, number | 'M'>();
 const MAX_CELL_VALUE_CACHE_SIZE = 5000;
 
 /**
+ * Initializes the world generator with a specific seed.
+ * This must be called before using isMine or getCellValue.
+ * @param seed The seed string (e.g., gameId).
+ */
+export function initializeWorldGenerator(seed: string): void {
+    console.log(`Initializing world generator with seed: ${seed}`);
+    rng = seedrandom(seed);
+    noise2D = createNoise2D(rng);
+    // Clear caches when the seed changes
+    mineCache.clear();
+    cellValueCache.clear();
+}
+
+/**
  * Creates a cache key from x and y coordinates
  */
 function createCacheKey(x: number, y: number): string {
@@ -31,6 +42,7 @@ function createCacheKey(x: number, y: number): string {
 
 /**
  * Determines if a cell at the given coordinates contains a mine based on Simplex noise.
+ * Requires initializeWorldGenerator to have been called.
  * The noise function outputs values between -1 and 1. We scale this to 0-1.
  * If the scaled noise value is above the threshold, it's NOT a mine.
  * @param x The x-coordinate.
@@ -38,6 +50,9 @@ function createCacheKey(x: number, y: number): string {
  * @returns True if the cell contains a mine, false otherwise.
  */
 export function isMine(x: number, y: number): boolean {
+    if (!noise2D) {
+        throw new Error("World generator not initialized. Call initializeWorldGenerator(seed) first.");
+    }
     const key = createCacheKey(x, y);
     
     // Check cache first
@@ -65,11 +80,15 @@ export function isMine(x: number, y: number): boolean {
 
 /**
  * Gets the value of a cell - either "M" for a mine or the count of adjacent mines (0-8).
+ * Requires initializeWorldGenerator to have been called.
  * @param x The x-coordinate.
  * @param y The y-coordinate.
  * @returns "M" if the cell is a mine, otherwise the count of adjacent mines (0-8).
  */
 export function getCellValue(x: number, y: number): number | 'M' {
+    if (!noise2D) {
+        throw new Error("World generator not initialized. Call initializeWorldGenerator(seed) first.");
+    }
     const key = createCacheKey(x, y);
     
     // Check cache first
