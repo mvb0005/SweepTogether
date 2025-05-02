@@ -3,7 +3,12 @@ import {
   RevealTilePayload,
   FlagTilePayload,
   ChordClickPayload,
-  ViewportUpdatePayload
+  ViewportUpdatePayload,
+  LeaderboardRequestPayload,
+  LeaderboardResponsePayload,
+  LeaderboardUpdatePayload,
+  ScoreUpdatePayload,
+  GameOverPayload
 } from '../../domain/types';
 
 export type SocketEventMap = {
@@ -13,6 +18,13 @@ export type SocketEventMap = {
   chordClick: ChordClickPayload & { gameId: string; socketId: string };
   updateViewport: ViewportUpdatePayload & { gameId: string; socketId: string };
   playerDisconnected: { socketId: string };
+  // Leaderboard events
+  getLeaderboard: LeaderboardRequestPayload & { socketId: string };
+  leaderboardData: LeaderboardResponsePayload;
+  leaderboardUpdate: LeaderboardUpdatePayload;
+  // Game events
+  scoreUpdate: ScoreUpdatePayload & { gameId: string };
+  gameOver: GameOverPayload & { gameId: string };
 };
 
 export type SocketEventName = keyof SocketEventMap;

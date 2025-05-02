@@ -1,7 +1,7 @@
 // backend/src/db.ts
 import { MongoClient, Db, Collection } from 'mongodb';
-// Import PointData from domain/types
-import { GameConfig, Player, Players, ScoringConfig, GameRepository, GameState, Cell, PointData } from '../../domain/types'; 
+// Import PointData, LeaderboardCategory, LeaderboardMetric, LeaderboardEntry from domain/types
+import { GameConfig, Player, Players, ScoringConfig, GameRepository, GameState, Cell, PointData, LeaderboardCategory, LeaderboardMetric, LeaderboardEntry } from '../../domain/types'; 
 
 // Define interfaces for DB documents
 export interface GameDocument {
@@ -33,6 +33,15 @@ export interface BoardChunkDocument {
    updatedAt: Date;
 }
 
+// Define interface for leaderboard document
+export interface LeaderboardDocument {
+    _id: string; // Combined ID of category_metric (e.g. "all_time_highest_score")
+    category: LeaderboardCategory;
+    metric: LeaderboardMetric;
+    entries: Array<LeaderboardEntry>;
+    updatedAt: Date;
+}
+
 // --- Connection Setup ---
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 const DB_NAME = process.env.DB_NAME || 'minesweeper_infinite';
@@ -44,6 +53,7 @@ let db: Db;
 let gamesCollection: Collection<GameDocument>;
 let playersCollection: Collection<PlayerDocument>;
 let boardChunksCollection: Collection<BoardChunkDocument>;
+let leaderboardsCollection: Collection<LeaderboardDocument>;
 
 export async function connectToDatabase(): Promise<void> {
     if (db) {
@@ -59,6 +69,7 @@ export async function connectToDatabase(): Promise<void> {
         gamesCollection = db.collection<GameDocument>('games');
         playersCollection = db.collection<PlayerDocument>('players');
         boardChunksCollection = db.collection<BoardChunkDocument>('boardChunks');
+        leaderboardsCollection = db.collection<LeaderboardDocument>('leaderboards');
 
         // --- Create Indexes ---
         // Index for finding games by ID
@@ -73,6 +84,11 @@ export async function connectToDatabase(): Promise<void> {
         await boardChunksCollection.createIndex({ gameId: 1, chunkX: 1, chunkY: 1 }, { unique: true });
         // Index potentially useful for cleanup tasks (e.g., finding old chunks)
         await boardChunksCollection.createIndex({ updatedAt: 1 });
+
+        // Indexes for leaderboards
+        await leaderboardsCollection.createIndex({ _id: 1 }); // Primary key index
+        await leaderboardsCollection.createIndex({ category: 1, metric: 1 }); // For querying by category and metric
+        await leaderboardsCollection.createIndex({ updatedAt: 1 }); // For time-based operations (daily/weekly boards)
 
         console.log(`Successfully connected to database: ${db.databaseName}`);
     } catch (error) {
@@ -104,6 +120,11 @@ export function getPlayersCollection(): Collection<PlayerDocument> {
 export function getBoardChunksCollection(): Collection<BoardChunkDocument> {
     if (!boardChunksCollection) throw new Error("Database not connected or boardChunks collection not initialized.");
     return boardChunksCollection;
+}
+
+export function getLeaderboardsCollection(): Collection<LeaderboardDocument> {
+    if (!leaderboardsCollection) throw new Error("Database not connected or leaderboards collection not initialized.");
+    return leaderboardsCollection;
 }
 
 // --- MongoDB Implementation of GameRepository ---

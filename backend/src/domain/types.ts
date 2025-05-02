@@ -231,3 +231,51 @@ export interface PlayerViewportUpdatePayload {
   playerId: string;
   viewport: ViewportState;
 }
+
+// --- Leaderboard Types ---
+
+export enum LeaderboardCategory {
+  ALL_TIME = 'all_time',
+  DAILY = 'daily',
+  WEEKLY = 'weekly'
+}
+
+export enum LeaderboardMetric {
+  HIGHEST_SCORE = 'highest_score',
+  MOST_MINES_FOUND = 'most_mines_found',
+  MOST_CELLS_REVEALED = 'most_cells_revealed',
+  MOST_GAMES_WON = 'most_games_won'
+}
+
+export interface LeaderboardEntry {
+  playerId: string;
+  username: string;
+  score: number;       // Value of the metric (e.g., total score, mines found)
+  gamesPlayed: number;
+  lastGameId?: string; // The ID of the last game that affected this entry
+  updatedAt: Date;    // When this entry was last updated
+}
+
+export interface LeaderboardData {
+  category: LeaderboardCategory;
+  metric: LeaderboardMetric;
+  entries: LeaderboardEntry[];
+}
+
+export interface LeaderboardUpdatePayload {
+  category: LeaderboardCategory;
+  metric: LeaderboardMetric;
+  entries: LeaderboardEntry[];
+  updatedAt: Date;
+}
+
+// --- Payload for leaderboard data request and response ---
+export interface LeaderboardRequestPayload {
+  category: LeaderboardCategory;
+  metric: LeaderboardMetric;
+  limit?: number;      // Maximum number of entries to return
+}
+
+export interface LeaderboardResponsePayload extends LeaderboardData {
+  updatedAt: Date;
+}

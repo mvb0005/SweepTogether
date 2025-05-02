@@ -27,6 +27,29 @@ export class GameUpdateService {
     }
 
     /**
+     * Send a generic event to all clients
+     * 
+     * @param eventName The name of the event to broadcast
+     * @param payload The data to send with the event
+     */
+    broadcast<T>(eventName: string, payload: T): void {
+        console.log(`[GameUpdateService] Broadcasting ${eventName}:`, payload);
+        // TODO: Implement actual Socket.IO broadcasting
+    }
+
+    /**
+     * Send a generic event to a specific client
+     * 
+     * @param socketId The ID of the socket to send to
+     * @param eventName The name of the event
+     * @param payload The data to send with the event
+     */
+    sendToClient<T>(socketId: string, eventName: string, payload: T): void {
+        console.log(`[GameUpdateService] Sending ${eventName} to ${socketId}:`, payload);
+        // TODO: Implement actual Socket.IO direct emitting
+    }
+
+    /**
      * Update a player's status (e.g., ACTIVE, LOCKED_OUT)
      */
     sendPlayerStatusUpdate(gameId: string, playerId: string, status: PlayerStatus, lockedUntil?: number): void {
