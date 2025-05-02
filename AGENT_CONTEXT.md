@@ -26,7 +26,7 @@
 - **UI Components:** `frontend/src/components/`
 - **Tests:** `backend/src/tests/`, `cypress/e2e/`
 - **Agent Personas:** `agent_personas/`
-- **Workflow Tracking:** `TODO.md`, `SESSIONS.md`, `PLANNING.md`
+- **Workflow Tracking:** `TODO.md`, `SESSIONS.md`, `SESSION_GUIDELINES.md`, `PLANNING.md`
 
 ## 5. Common Commands (from `/mnt/c/Users/mvb/code/Mines`)
 - **Run Dev Env:** `docker-compose up --build`
@@ -79,7 +79,7 @@ Select the appropriate persona file based on the task. The **Prompt Engineering 
 
 ## 9. Collaboration Workflow (Session-Based)
 
-We use a structured, session-based workflow to track progress and maintain context. Refer to `PLANNING.md` for the overall project roadmap.
+We use a structured, session-based workflow to track progress and maintain context. Refer to `PLANNING.md` for the overall project roadmap and `SESSION_GUIDELINES.md` for detailed instructions on session structure and ending procedures.
 
 **Workflow Steps:**
 1.  **Propose Goal:** The AI proposes a goal for the next session (a logically contained unit of work, often derived from `PLANNING.md`).
@@ -105,3 +105,21 @@ We use a structured, session-based workflow to track progress and maintain conte
 *   **Error Handling:** Clearly log failures in `SESSIONS.md` and Git commits. The next session may need to address the failure.
 *   **User Intent:** Clearly state high-level goals before prompt generation.
 *   **Pre-computation/Analysis:** For complex tasks, consider a planning step where the AI first analyzes code and proposes a plan before generating the implementation prompt.
+
+## 10. Session Guidelines & Documentation
+
+The `SESSION_GUIDELINES.md` document provides detailed guidance on how to structure, execute, and document development sessions for this project. This document should be consulted when:
+
+- **Starting a new session:** To understand the expected structure and planning approach
+- **Ending a session:** To follow the proper procedure for documentation and handoff
+- **Writing tests:** For guidance on test coverage expectations
+- **Updating documentation:** For format and content guidelines
+
+Key aspects covered in the guidelines include:
+- Session structure (planning, implementation, testing, documentation)
+- End-of-session procedures
+- Test coverage expectations
+- Documentation standards for session files
+- Commit message conventions
+
+Following these guidelines ensures consistency, maintains clear documentation of project progress, and facilitates knowledge transfer between sessions.

@@ -260,8 +260,115 @@ export class PlayerActionService {
         }
     }
 
-    private handleChordClick(payload: SocketEventMap['chordClick']) {
+    private async handleChordClick(payload: SocketEventMap['chordClick']) {
         console.log('[PlayerActionService] chordClick event:', payload);
-        // TODO: Implement chord click logic using gridLogic.chordClick (will be done in a future session)
+
+        const { gameId, socketId, x, y } = payload;
+
+        const validationResult = this.validateAction(gameId, socketId);
+        if (!validationResult) return;
+
+        const { gameState, player } = validationResult;
+
+        // Call chordClick from gridLogic
+        try {
+            const result = await gridLogic.chordClick(
+                gameState,
+                x,
+                y,
+                this.gameStateService.getCell
+            );
+
+            // Handle result
+            if ('hitMine' in result) {
+                // Mine hit case
+                const { hitMine } = result;
+
+                // Update player status to LOCKED_OUT
+                player.status = PlayerStatus.LOCKED_OUT;
+                player.lockedUntil = Date.now() + gameState.scoringConfig.lockoutDurationMs;
+
+                // Calculate score deduction
+                const scoreDelta = -gameState.scoringConfig.mineHitPenalty;
+                player.score += scoreDelta;
+
+                // Persist the revealed mine state
+                this.gameStateService.updateGridCell(gameId, hitMine);
+
+                // Send updates to clients
+                // 1. Player status update
+                this.gameUpdateService.sendPlayerStatusUpdate(
+                    gameId,
+                    socketId,
+                    player.status,
+                    player.lockedUntil
+                );
+
+                // 2. Score update
+                this.gameUpdateService.sendScoreUpdate(
+                    gameId,
+                    socketId,
+                    player.score,
+                    scoreDelta,
+                    'Hit Mine (Chord Click)'
+                );
+
+                // 3. Tile update for the revealed mine
+                this.gameUpdateService.sendTileUpdate(
+                    gameId,
+                    {
+                        x: hitMine.x,
+                        y: hitMine.y,
+                        revealed: true,
+                        flagged: false,
+                        isMine: true
+                    }
+                );
+
+                console.log(`Player ${socketId} hit a mine during chord click at (${x},${y}).`);
+            } else {
+                // Successful reveal case (array of cells)
+                const revealedCells: Cell[] = result;
+
+                if (revealedCells.length === 0) {
+                    // Nothing to reveal (already revealed/flagged or insufficient flags around number)
+                    console.log(`Chord click at (${x},${y}) did not reveal any cells.`);
+                    return;
+                }
+
+                // Calculate score increase (only for non-mine cells)
+                const scoreDelta = revealedCells.length * gameState.scoringConfig.numberRevealPoints;
+                player.score += scoreDelta;
+
+                // Persist the state changes for all revealed cells
+                this.gameStateService.updateGridCells(gameId, revealedCells);
+
+                // Send updates to clients
+                // 1. Score update
+                this.gameUpdateService.sendScoreUpdate(
+                    gameId,
+                    socketId,
+                    player.score,
+                    scoreDelta,
+                    'Chord Click Reveal'
+                );
+
+                // 2. Tiles update for all revealed cells
+                const tilesUpdatePayload = revealedCells.map(cell => ({
+                    x: cell.x,
+                    y: cell.y,
+                    revealed: cell.revealed,
+                    flagged: cell.flagged,
+                    adjacentMines: cell.adjacentMines
+                }));
+
+                this.gameUpdateService.sendTilesUpdate(gameId, tilesUpdatePayload);
+
+                console.log(`Player ${socketId} revealed ${revealedCells.length} cells via chord click at (${x},${y}).`);
+            }
+        } catch (error) {
+            console.error('Error performing chord click:', error);
+            this.gameUpdateService.sendError(socketId, 'Failed to perform chord click');
+        }
     }
 }
