@@ -9,8 +9,9 @@ import { registerSocketHandlers } from './socketHandlers';
 // Import DB functions and repository implementation
 import { connectToDatabase, disconnectFromDatabase, MongoGameRepository } from '../persistence/db'; 
 
-// Import the application service
-import { GameService } from '../../application/gameService';
+// Import the bootstrap function
+import { eventBus } from '../../application/services';
+
 
 const app = express();
 
@@ -28,17 +29,9 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
-// --- Instantiate Repository and Service ---
-// Instantiate the concrete repository implementation
-const gameRepository = new MongoGameRepository(); 
-const gameService = new GameService(gameRepository);
-// Provide the io server instance to the game service
-gameService.setIoServer(io);
-
 // Set up Socket.IO event handlers using the new structure
 io.on('connection', (socket) => {
-    // Pass the gameService instance to the handler registration
-    registerSocketHandlers(io, socket, gameService);
+    registerSocketHandlers(io, socket, eventBus);
 });
 
 // --- Start Server Function (mostly unchanged) ---

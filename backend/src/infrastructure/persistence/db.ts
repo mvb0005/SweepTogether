@@ -1,7 +1,7 @@
 // backend/src/db.ts
 import { MongoClient, Db, Collection } from 'mongodb';
 // Import PointData from domain/types
-import { GameConfig, Player, Players, ScoringConfig, GameRepository, GameState, Cell, PointData } from './types'; 
+import { GameConfig, Player, Players, ScoringConfig, GameRepository, GameState, Cell, PointData } from '../../domain/types'; 
 
 // Define interfaces for DB documents
 export interface GameDocument {
