@@ -321,4 +321,35 @@
     * Continue refactoring for infinite world support and viewport-based updates.
     * Expand tests and error handling as new features are added.
 
----
+## Session 0: Setup & Workflow Definition (2025-05-02)
+
+**Goal:** Define and set up the session-based workflow, context files, and personas.
+
+**Summary:**
+- Created `AGENT_CONTEXT.md` detailing project structure, tech stack, architecture, and the new session-based workflow.
+- Created persona files in `agent_personas/` for Backend Developer, Frontend Developer, Testing Expert, Persistence Expert, DevOps Engineer, and Prompt Engineering Expert.
+- Renamed `board.ts` -> `gridLogic.ts` and `board.test.ts` -> `gridLogic.test.ts`.
+- Updated `gameStateService.ts` to integrate `SpatialHashGrid` and `worldGenerator`, implementing `getCell`.
+- Fixed unit tests for `gridLogic.ts`.
+
+**Outcome:** Workflow defined, context files created, codebase prepared for structured sessions.
+
+## Session 1: Refactor PlayerActionService for REVEAL_TILE (2025-05-02)
+
+**Goal:** Refactor `PlayerActionService` to handle the `REVEAL_TILE` action using the new infinite world logic (`gridLogic.ts`, `gameStateService.ts`).
+
+**Summary:**
+- Created a minimal implementation of `GameUpdateService` for sending client updates (player status, scores, tile updates).
+- Updated `PlayerActionService` to integrate with the infinite world logic:
+  - Added proper handling of both mine hit cases and successful reveals
+  - Integrated with `gridLogic.revealCell` and `gameStateService.getCell` for core logic
+  - Implemented score calculations and player status updates
+  - Used `gameStateService.updateGridCells`/`updateGridCell` to persist state in `SpatialHashGrid`
+- Updated service wiring in `services.ts` to properly inject dependencies
+
+**Decisions:**
+- Used a separate `GameUpdateService` for client communication rather than publishing directly to the event bus
+- Set up a clean separation of concerns: `gridLogic.ts` for game rules, `gameStateService.ts` for state persistence, `GameUpdateService` for client notifications
+- Left the `flagTile` and `chordClick` handlers for future sessions
+
+**Outcome:** The `REVEAL_TILE` action now works with the infinite world, handling both mine hits and successful reveals correctly.
