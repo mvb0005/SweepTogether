@@ -76,3 +76,6 @@ Implemented chord click functionality in PlayerActionService with comprehensive 
 
 ## Session 24: [Implement ScoreService](./prompts/SESSION_24_Implement_ScoreService.md) (2025-05-02)
 Implemented a dedicated ScoreService to centralize game scoring logic. The service handles scoring for revealing cells, hitting mines, and flag operations (placing/removing). Updated PlayerActionService to delegate all score-related operations to ScoreService. Comprehensive unit tests were added to ensure proper integration between services.
+
+## Session 25: [Implement LeaderboardService](./prompts/SESSION_25_Implement_LeaderboardService.md) (2025-05-02)
+Implemented a LeaderboardService that tracks player rankings across multiple games. The service maintains leaderboards for different categories (all-time, daily, weekly) and metrics (highest score, most mines found, most cells revealed, games won). Added MongoDB persistence with efficient indexing and caching for performance optimization. Created comprehensive unit tests to verify the service's functionality.
