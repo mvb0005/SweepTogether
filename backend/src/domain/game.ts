@@ -1,25 +1,7 @@
 import {
-  Board, Cell, GameConfig, MineReveal, Player, PlayerStatus,
-  Coordinates, ScoreUpdatePayload, PlayerStatusUpdatePayload
+  Cell, GameConfig, MineReveal, Player, PlayerStatus,
+  Coordinates, ScoreUpdatePayload, PlayerStatusUpdatePayload, GameState
 } from './types';
-
-// Define GameStateEnum as an enum for runtime usage
-export enum GameStateEnum {
-  PENDING = 'PENDING',
-  ACTIVE = 'ACTIVE',
-  COMPLETED = 'COMPLETED'
-}
-
-// Define GameState as an interface for the game state structure
-export interface GameState {
-  gameId: string;
-  state: GameStateEnum;
-  players: Record<string, Player>;
-  boardConfig: {
-    isInfiniteWorld: boolean;
-  };
-}
-import { BoardImpl } from './board';
 
 // --- Type Definition for Cell Retrieval ---
 
@@ -119,26 +101,3 @@ export function checkPlayerLockout(player: Player, now: number = Date.now()): { 
 }
 
 // ... other existing functions ...
-
-/**
- * The Game class manages game state and board interactions
- */
-export class Game {
-  readonly id: string;
-  readonly config: GameConfig;
-  readonly board: BoardImpl;
-  players: Map<string, Player>;
-  state: GameStateEnum;
-  private broadcastUpdate: (gameId: string, state: any) => void;
-
-  constructor(id: string, config: GameConfig, broadcastUpdate: (gameId: string, state: any) => void) {
-    this.id = id;
-    this.config = config;
-    this.board = new BoardImpl(config.rows, config.cols, config.mines);
-    this.players = new Map();
-    this.state = GameStateEnum.PENDING;
-    this.broadcastUpdate = broadcastUpdate;
-  }
-
-  // ... existing methods ...
-}

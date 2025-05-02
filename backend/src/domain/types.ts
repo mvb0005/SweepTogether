@@ -16,11 +16,21 @@ export interface PointData {
 
 // Represents the full state of a cell, including inherent properties
 export interface Cell {
+  x: number; // Added coordinates to the cell itself
+  y: number; // Added coordinates to the cell itself
   isMine: boolean;
   adjacentMines: number; // Number of mines in 8 surrounding cells
   revealed: boolean;
   flagged: boolean;
   // Potentially add: revealedByPlayerId?: string;
+}
+
+// Enum to represent the visual state, derived from boolean flags
+export enum CellState {
+  HIDDEN = 'hidden',
+  REVEALED = 'revealed',
+  FLAGGED = 'flagged',
+  REVEALED_MINE = 'revealed_mine' // Special state for a mine hit by the player
 }
 
 // Represents the state of a cell sent to the client

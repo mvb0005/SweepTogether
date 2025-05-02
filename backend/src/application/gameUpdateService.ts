@@ -5,4 +5,3 @@
  * It encapsulates the Socket.IO server interaction logic for game updates.
  */
 
-// TODO: Implement game update broadcasting logic
