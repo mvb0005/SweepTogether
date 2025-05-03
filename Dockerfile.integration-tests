@@ -1,0 +1,20 @@
+# Use an official Python runtime as a parent image
+FROM python:alpine
+
+# Install system dependencies (optional: keep Chromium if needed for other tests)
+RUN apk add --no-cache \
+    curl \
+    bash
+
+# Set working directory
+WORKDIR /app
+
+# Copy Python requirements and install dependencies
+COPY integration-tests/requirements.txt ./integration-tests/requirements.txt
+RUN pip install --no-cache-dir -r integration-tests/requirements.txt
+
+# Copy the integration test files
+COPY integration-tests/ ./integration-tests/
+
+# Default command will run the Python bot runner
+CMD ["python", "integration-tests/bots_runner.py"]

@@ -1,0 +1,21 @@
+{
+    "dbcode.connections": [
+        {
+            "connectionId": "fPp_J7LMjSBRmG914g9-W",
+            "name": "Localhost",
+            "driver": "mongodb",
+            "connectionType": "host",
+            "driverOptions": {
+                "protocol": "mongodb://"
+            },
+            "host": "localhost",
+            "port": 27017,
+            "ssl": false,
+            "username": "mongo_user",
+            "password": "",
+            "savePassword": "secretStorage",
+            "readOnly": false,
+            "connectionTimeout": 30
+        }
+    ]
+}

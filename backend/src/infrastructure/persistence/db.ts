@@ -65,6 +65,8 @@ export async function connectToDatabase(): Promise<void> {
         await client.connect();
         db = client.db(DB_NAME);
 
+        console.log(`Connected to MongoDB at ${MONGODB_URI}`);
+        console.log(`Using database: ${DB_NAME}`); 
         // Initialize collections
         gamesCollection = db.collection<GameDocument>('games');
         playersCollection = db.collection<PlayerDocument>('players');

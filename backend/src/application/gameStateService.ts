@@ -6,7 +6,7 @@
  * and potentially board chunks for infinite worlds.
  */
 
-import { GameState, Cell, Coordinates, PointData, GameConfig } from '../domain/types';
+import { GameState, Cell, Coordinates, PointData, GameConfig, PlayerStatus } from '../domain/types';
 import { SpatialHashGrid } from '../domain/spatialHashGrid';
 import { initializeWorldGenerator, isMine, getCellValue } from '../domain/worldGenerator';
 import { GetCellFunction } from '../domain/game';
@@ -32,12 +32,24 @@ export class GameStateService {
      */
     setGame(gameId: string, state: GameState): void {
         // Initialize grid/generator if it's a new infinite game
-        if (state.boardConfig.isInfiniteWorld && !state.spatialGrid) {
-            console.log(`Initializing spatial grid for infinite game: ${gameId}`);
-            state.spatialGrid = new SpatialHashGrid<PointData>(SPATIAL_GRID_CELL_SIZE);
-            // Ensure world generator is seeded for this game
-            this.ensureWorldGeneratorInitialized(gameId);
+        console.log(`Initializing spatial grid for infinite game: ${gameId}`);
+        state.spatialGrid = new SpatialHashGrid<PointData>(SPATIAL_GRID_CELL_SIZE);
+        // Ensure world generator is seeded for this game
+
+        if (!state?.boardConfig) {
+            state = {
+                ...state,
+                boardConfig: {
+                    isInfiniteWorld: true,
+                    rows: 0,
+                    cols: 0,
+                    mines: 0,
+                    // Add other default board config properties if needed
+                },
+            }
         }
+        state.boardConfig.isInfiniteWorld = true; // Assuming all games are infinite for now
+        this.ensureWorldGeneratorInitialized(gameId);
         this.games.set(gameId, state);
     }
 
@@ -155,5 +167,70 @@ export class GameStateService {
     */
     updateGridCell(gameId: string, cellToUpdate: Cell): void {
         this.updateGridCells(gameId, [cellToUpdate]);
+    }
+
+    /**
+     * Create a new game with the given config and ID.
+     */
+    createGame(gameId: string, config: GameConfig): void {
+        if (this.games.has(gameId)) {
+            throw new Error(`Game with ID ${gameId} already exists.`);
+        }
+        const newGame: GameState = {
+            gameId,
+            boardConfig: config,
+            players: {},
+            gameOver: false,
+            mineReveals: [],
+            pendingReveals: [],
+            scoringConfig: {
+                firstPlacePoints: 0,
+                secondPlacePoints: 0,
+                thirdPlacePoints: 0,
+                numberRevealPoints: 0,
+                mineHitPenalty: 0,
+                lockoutDurationMs: 0,
+                mineRevealDelayMs: 0,
+                flagPlacePoints: 0,
+                flagRemovePoints: 0
+            },
+            spatialGrid: new SpatialHashGrid<PointData>(SPATIAL_GRID_CELL_SIZE),
+        };
+        this.setGame(gameId, newGame);
+    }
+
+    /**
+     * Add a player to a game.
+     */
+    addPlayer(gameId: string, playerId: string, username: string): void {
+        const game = this.getGame(gameId);
+        if (!game) throw new Error(`Game ${gameId} not found.`);
+        if (game.players[playerId]) return; // Already added
+        game.players[playerId] = {
+            id: playerId,
+            username,
+            score: 0,
+            status: PlayerStatus.ACTIVE, // Default status
+            // Add more player fields as needed
+        };
+        this.setGame(gameId, game);
+    }
+
+    /**
+     * Check if a game exists.
+     */
+    gameExists(gameId: string): boolean {
+        return this.games.has(gameId);
+    }
+
+    /**
+     * Set a player's status (active/inactive).
+     */
+    setPlayerStatus(gameId: string, playerId: string, status: PlayerStatus): void {
+        const game = this.getGame(gameId);
+        if (!game) throw new Error(`Game ${gameId} not found.`);
+        if (!game.players[playerId]) throw new Error(`Player ${playerId} not found in game ${gameId}.`);
+        game.players[playerId].status = status;
+        this.setGame(gameId, game);
     }
 }

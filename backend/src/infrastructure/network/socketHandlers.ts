@@ -36,6 +36,7 @@ export function registerSocketHandlers(
   // Dynamically register handlers for only the events with subscribers
   const eventNames = eventBus.getSubscribedEventNames();
   for (const eventName of eventNames) {
+    console.log(`Event received: ${eventName}`, eventName);
     socket.on(eventName as string, (data: any) => {
       let payload: any = { ...data, socketId: socket.id };
       if ('gameId' in socket.data && !payload.gameId) {

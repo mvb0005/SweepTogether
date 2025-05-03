@@ -79,3 +79,6 @@ Implemented a dedicated ScoreService to centralize game scoring logic. The servi
 
 ## Session 25: [Implement LeaderboardService](./prompts/SESSION_25_Implement_LeaderboardService.md) (2025-05-02)
 Implemented a LeaderboardService that tracks player rankings across multiple games. The service maintains leaderboards for different categories (all-time, daily, weekly) and metrics (highest score, most mines found, most cells revealed, games won). Added MongoDB persistence with efficient indexing and caching for performance optimization. Created comprehensive unit tests to verify the service's functionality.
+
+## Session 26: [Backend Completion Plan](./prompts/SESSION_26_Backend_Completion_Plan.md) (Upcoming)
+Planning session to identify and prioritize the remaining components needed to complete the backend to a minimally usable level. Will focus on Socket.IO integration, game lifecycle management, API endpoints, error handling, session management, and basic logging/monitoring.

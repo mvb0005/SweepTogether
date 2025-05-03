@@ -10,8 +10,7 @@ import { registerSocketHandlers } from './socketHandlers';
 import { connectToDatabase, disconnectFromDatabase, MongoGameRepository } from '../persistence/db'; 
 
 // Import the bootstrap function
-import { eventBus } from '../../application/services';
-
+import { initAppServices } from '../../application/services';
 
 const app = express();
 
@@ -29,16 +28,20 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
-// Set up Socket.IO event handlers using the new structure
-io.on('connection', (socket) => {
-    registerSocketHandlers(io, socket, eventBus);
-});
-
-// --- Start Server Function (mostly unchanged) ---
+// --- Start Server Function (refactored for async service init) ---
 async function startServer() {
     try {
         // Connect to the database before starting the server
         await connectToDatabase();
+
+        // Initialize all app services (waits for DB/collections)
+        const services = initAppServices();
+
+        // Set up Socket.IO event handlers using the new structure
+        io.on('connection', (socket) => {
+            console.log(`Client connected: ${socket.id}`);
+            registerSocketHandlers(io, socket, services.eventBus);
+        });
 
         // Start the HTTP server
         server.listen(PORT, () => {

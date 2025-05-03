@@ -26,9 +26,3 @@ RUN if [ "$NODE_ENV" = "production" ]; then \
 # Make port 3000 available
 EXPOSE 3000
 
-# Define the command to run based on NODE_ENV
-CMD if [ "$NODE_ENV" = "production" ]; then \
-      node dist/server.js; \
-    else \
-      npm run dev; \
-    fi

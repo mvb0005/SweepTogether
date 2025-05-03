@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build: ./backend
@@ -8,7 +6,7 @@ services:
     volumes:
       - ./backend:/usr/src/app # Mount backend code
       - /usr/src/app/node_modules # Keep container's node_modules
-    command: npx nodemon --legacy-watch --watch src --ext ts --exec 'ts-node' src/infrastructure/network/server.ts
+    command: npx nodemon --legacy-watch --watch src --ext ts --exec 'ts-node' src/server.ts
     environment:
       - NODE_ENV=development
       # Updated MongoDB connection string
@@ -56,6 +54,12 @@ services:
     networks:
       - minesweeper-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
   mongo:
     image: mongo:latest # Use official MongoDB image
@@ -87,6 +91,25 @@ services:
     environment:
       - CYPRESS_BASE_URL=http://nginx:80
     command: npx cypress run --browser chrome --headless
+
+  # Integration tests sidecar container
+  integration-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.integration-tests
+    profiles: ["test", "integration"]
+    volumes:
+      - ./reports:/app/reports
+    networks:
+      - minesweeper-net
+    environment:
+      - TARGET_URL=http://backend:3001
+      - RETRY_COUNT=3
+      - RETRY_INTERVAL=10
+      - TEST_PATTERN=integration-tests/*.spec.js
+      - DEBUG=false
+    # Exit after tests complete
+    restart: "no"
 
 volumes:
   mongo_data:
