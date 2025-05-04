@@ -46,3 +46,27 @@ docker-compose -f docker-compose.sidecar-tests.yml up
 - [ ] Implement Slack/Teams notifications for test failures
 - [ ] Add more comprehensive application tests
 - [ ] Configure for Kubernetes deployment with helm chart
+
+## Backend Code Review Action Items (Session 27)
+
+Based on the code review conducted in Session 27, the following items need addressing:
+
+-   **[Critical] Refactor `worldGenerator.ts` for Concurrency:**
+    -   Modify `worldGenerator.ts` to encapsulate its state (RNG, noise function, caches) instead of using shared global variables.
+    -   This could involve creating a class or factory function that returns a generator instance seeded per gameId.
+    -   Update `GameStateService` to manage these per-game generator instances.
+-   **[Medium] Add Linting/Formatting:**
+    -   Install ESLint and Prettier (`npm install --save-dev eslint prettier eslint-config-prettier eslint-plugin-prettier @typescript-eslint/eslint-plugin @typescript-eslint/parser`).
+    -   Configure ESLint (`.eslintrc.js`) and Prettier (`.prettierrc.js` or `package.json`).
+    -   Add a `lint` script to `backend/package.json`.
+    -   Run the linter and fix reported issues.
+-   **[Low] Refactor `PlayerActionService` Result Handling:**
+    -   Extract the common logic for handling `MineHitResult` (updating player status, score, grid, sending updates) into a private helper method.
+    -   Extract the common logic for handling successful reveals (updating score, grid, sending updates) into another private helper method.
+    -   Call these helpers from `handleRevealTile` and `handleChordClick`.
+-   **[Low] Add Runtime Input Validation:**
+    -   Install `zod` (`npm install zod`).
+    -   Define Zod schemas for incoming socket event payloads (`RevealTilePayload`, `FlagTilePayload`, `ChordClickPayload`, etc.) likely in `src/infrastructure/network/socketEvents.ts` or a dedicated validation file.
+    -   Use the schemas to parse and validate incoming data in `socketHandlers.ts` before publishing to the event bus. Emit errors for invalid data.
+-   **[Future] Implement Authentication/Authorization:**
+    -   Replace reliance on `socket.id` with a proper user authentication mechanism (e.g., JWT, sessions) when moving towards a production-ready system.
