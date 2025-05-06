@@ -9,7 +9,7 @@ import string
 import time
 from typing import Optional, Any, Dict, List, Tuple
 
-BACKEND_URL = 'http://localhost:3001'  # Use Docker Compose service name
+BACKEND_URL = 'http://host.docker.internal:3001'  # Changed from localhost
 NUM_BOTS = 1 # Change to desired concurrency
 
 class BotPlayer:
@@ -73,8 +73,10 @@ class BotPlayer:
     async def play_game(self) -> None:
         print(f"Bot {self.bot_id}: Playing game with ID: {self.game_id}")
         for i in range(10):  # Play for a limited number of moves
+            print(f"Bot {self.bot_id}: Making move {i + 1}")
             await self.sio.emit('revealTile', {'gameId': self.game_id, 'playerId': self.username, 'x': random.randint(0, 7), 'y': random.randint(0, 7)})
-        # await self.sio.disconnect()
+            await asyncio.sleep(1)  # Simulate time between moves
+        await self.sio.disconnect()
 
     async def make_random_move(self, game_state: Dict[str, Any]) -> None:
         board = game_state.get('boardState')

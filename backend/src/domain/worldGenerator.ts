@@ -1,127 +1,117 @@
-import { createNoise2D } from 'simplex-noise'; // Removed Noise2D import
+import { createNoise2D } from 'simplex-noise';
 import seedrandom, { PRNG } from 'seedrandom';
-
-// Variables to hold the seeded generator and noise function
-// These will be initialized by initializeWorldGenerator
-let rng: PRNG;
-// Use the function signature type directly
-let noise2D: (x: number, y: number) => number;
 
 // TODO: Make density configurable
 const MINE_DENSITY_THRESHOLD = 0.85; // Adjust this value (0 to 1). Higher = fewer mines.
-
-// Cache for isMine results
-const mineCache = new Map<string, boolean>();
-// Cache size limits to prevent memory issues with infinite world
 const MAX_CACHE_SIZE = 10000;
-
-// Cache for getCellValue results
-const cellValueCache = new Map<string, number | 'M'>();
 const MAX_CELL_VALUE_CACHE_SIZE = 5000;
 
-/**
- * Initializes the world generator with a specific seed.
- * This must be called before using isMine or getCellValue.
- * @param seed The seed string (e.g., gameId).
- */
-export function initializeWorldGenerator(seed: string): void {
-    console.log(`Initializing world generator with seed: ${seed}`);
-    rng = seedrandom(seed);
-    noise2D = createNoise2D(rng);
-    // Clear caches when the seed changes
-    mineCache.clear();
-    cellValueCache.clear();
-}
+export type Noise2DFunction = (x: number, y: number) => number;
 
-/**
- * Creates a cache key from x and y coordinates
- */
-function createCacheKey(x: number, y: number): string {
-    return `${x},${y}`;
-}
+export class WorldGenerator {
+    private rng: PRNG;
+    private noise2D: Noise2DFunction;
+    private mineCache: Map<string, boolean>;
+    private cellValueCache: Map<string, number | 'M'>;
+    private seed: string; // Store the seed for potential debugging or re-initialization
 
-/**
- * Determines if a cell at the given coordinates contains a mine based on Simplex noise.
- * Requires initializeWorldGenerator to have been called.
- * The noise function outputs values between -1 and 1. We scale this to 0-1.
- * If the scaled noise value is above the threshold, it's NOT a mine.
- * @param x The x-coordinate.
- * @param y The y-coordinate.
- * @returns True if the cell contains a mine, false otherwise.
- */
-export function isMine(x: number, y: number): boolean {
-    if (!noise2D) {
-        throw new Error("World generator not initialized. Call initializeWorldGenerator(seed) first.");
+    /**
+     * Initializes the world generator instance with a specific seed.
+     * @param seed The seed string (e.g., gameId).
+     * @param noise2DFn Optional custom noise function for testing.
+     */
+    constructor(seed: string, noise2DFn?: Noise2DFunction) {
+        console.log(`Initializing WorldGenerator instance with seed: ${seed}`);
+        this.seed = seed;
+        this.rng = seedrandom(seed);
+        this.noise2D = noise2DFn || createNoise2D(this.rng);
+        this.mineCache = new Map<string, boolean>();
+        this.cellValueCache = new Map<string, number | 'M'>();
     }
-    const key = createCacheKey(x, y);
-    
-    // Check cache first
-    if (mineCache.has(key)) {
-        return mineCache.get(key)!;
+
+    /**
+     * Creates a cache key from x and y coordinates.
+     */
+    private createCacheKey(x: number, y: number): string {
+        return `${x},${y}`;
     }
-    
-    // Calculate if not in cache
-    const noiseValue = noise2D(x, y); // Output: -1 to 1
-    const scaledValue = (noiseValue + 1) / 2; // Scale to 0 to 1
-    const result = scaledValue < (1 - MINE_DENSITY_THRESHOLD); // Mine if below (1 - threshold)
-    
-    // Store in cache, managing cache size
-    if (mineCache.size >= MAX_CACHE_SIZE) {
-        // Simple cache eviction - remove oldest entry
-        const firstKey = Array.from(mineCache.keys())[0];
-        if (firstKey) {
-            mineCache.delete(firstKey);
+
+    /**
+     * Determines if a cell at the given coordinates contains a mine based on Simplex noise.
+     * Uses the instance's seeded RNG and noise function.
+     * @param x The x-coordinate.
+     * @param y The y-coordinate.
+     * @returns True if the cell contains a mine, false otherwise.
+     */
+    public isMine(x: number, y: number): boolean {
+        const key = this.createCacheKey(x, y);
+
+        // Check cache first
+        if (this.mineCache.has(key)) {
+            return this.mineCache.get(key)!;
         }
-    }
-    
-    mineCache.set(key, result);
-    return result;
-}
 
-/**
- * Gets the value of a cell - either "M" for a mine or the count of adjacent mines (0-8).
- * Requires initializeWorldGenerator to have been called.
- * @param x The x-coordinate.
- * @param y The y-coordinate.
- * @returns "M" if the cell is a mine, otherwise the count of adjacent mines (0-8).
- */
-export function getCellValue(x: number, y: number): number | 'M' {
-    if (!noise2D) {
-        throw new Error("World generator not initialized. Call initializeWorldGenerator(seed) first.");
-    }
-    const key = createCacheKey(x, y);
-    
-    // Check cache first
-    if (cellValueCache.has(key)) {
-        return cellValueCache.get(key)!;
-    }
-    
-    let result: number | 'M';
-    
-    if (isMine(x, y)) {
-        result = 'M';
-    } else {
-        let mineCount = 0;
-        for (let dx = -1; dx <= 1; dx++) {
-            for (let dy = -1; dy <= 1; dy++) {
-                if (dx === 0 && dy === 0) continue;
-                if (isMine(x + dx, y + dy)) {
-                    mineCount++;
-                }
+        // Calculate if not in cache
+        const noiseValue = this.noise2D(x, y); // Output: -1 to 1
+        const scaledValue = (noiseValue + 1) / 2; // Scale to 0 to 1
+        const result = scaledValue < (1 - MINE_DENSITY_THRESHOLD); // Mine if below (1 - threshold)
+
+        // Store in cache, managing cache size
+        if (this.mineCache.size >= MAX_CACHE_SIZE) {
+            // Simple cache eviction - remove oldest entry
+            const firstKey = this.mineCache.keys().next().value;
+            if (firstKey) {
+                this.mineCache.delete(firstKey);
             }
         }
-        result = mineCount;
+
+        this.mineCache.set(key, result);
+        return result;
     }
-    
-    // Store in cache, managing cache size
-    if (cellValueCache.size >= MAX_CELL_VALUE_CACHE_SIZE) {
-        // Simple cache eviction - remove oldest entry
-        const firstKey = Array.from(cellValueCache.keys())[0];
-        if (firstKey) {
-            cellValueCache.delete(firstKey);
+
+    /**
+     * Gets the value of a cell - either "M" for a mine or the count of adjacent mines (0-8).
+     * Uses the instance's seeded RNG and noise function.
+     * @param x The x-coordinate.
+     * @param y The y-coordinate.
+     * @returns "M" if the cell is a mine, otherwise the count of adjacent mines (0-8).
+     */
+    public getCellValue(x: number, y: number): number | 'M' {
+        const key = this.createCacheKey(x, y);
+
+        // Check cache first
+        if (this.cellValueCache.has(key)) {
+            return this.cellValueCache.get(key)!;
         }
+
+        let result: number | 'M';
+
+        if (this.isMine(x, y)) {
+            result = 'M';
+        } else {
+            let mineCount = 0;
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    if (dx === 0 && dy === 0) continue;
+                    // Use instance method isMine
+                    if (this.isMine(x + dx, y + dy)) {
+                        mineCount++;
+                    }
+                }
+            }
+            result = mineCount;
+        }
+
+        // Store in cache, managing cache size
+        if (this.cellValueCache.size >= MAX_CELL_VALUE_CACHE_SIZE) {
+            // Simple cache eviction - remove oldest entry
+            const firstKey = this.cellValueCache.keys().next().value;
+            if (firstKey) {
+                this.cellValueCache.delete(firstKey);
+            }
+        }
+
+        this.cellValueCache.set(key, result);
+        return result;
     }
-    
-    cellValueCache.set(key, result);
-    return result;
 }

@@ -125,3 +125,6 @@ dist
 
 # Docker specific
 docker-compose.override.yml
+
+# Local env files
+.venv

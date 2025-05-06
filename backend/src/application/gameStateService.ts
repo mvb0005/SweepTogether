@@ -8,7 +8,8 @@
 
 import { GameState, Cell, Coordinates, PointData, GameConfig, PlayerStatus } from '../domain/types';
 import { SpatialHashGrid } from '../domain/spatialHashGrid';
-import { initializeWorldGenerator, isMine, getCellValue } from '../domain/worldGenerator';
+// Import the WorldGenerator class instead of the old functions
+import { WorldGenerator } from '../domain/worldGenerator';
 import { GetCellFunction } from '../domain/game';
 
 // Define a reasonable cell size for the spatial hash grid chunks
@@ -16,8 +17,8 @@ const SPATIAL_GRID_CELL_SIZE = 16;
 
 export class GameStateService {
     private games: Map<string, GameState> = new Map();
-    // Cache world generators initialized per game seed
-    private worldGeneratorsInitialized: Set<string> = new Set();
+    // Use a Map to store WorldGenerator instances per gameId (seed)
+    private worldGenerators: Map<string, WorldGenerator> = new Map();
 
     /**
      * Get the game state for a given gameId.
@@ -28,15 +29,18 @@ export class GameStateService {
 
     /**
      * Set or update the game state for a given gameId.
-     * Initializes SpatialGrid and WorldGenerator for new infinite games.
+     * Initializes SpatialGrid for new infinite games.
+     * Note: WorldGenerator is now created on demand via getWorldGenerator.
      */
     setGame(gameId: string, state: GameState): void {
-        // Initialize grid/generator if it's a new infinite game
-        console.log(`Initializing spatial grid for infinite game: ${gameId}`);
-        state.spatialGrid = new SpatialHashGrid<PointData>(SPATIAL_GRID_CELL_SIZE);
-        // Ensure world generator is seeded for this game
+        // Initialize grid if it's a new infinite game and grid doesn't exist
+        if (!state.spatialGrid) {
+            console.log(`Initializing spatial grid for infinite game: ${gameId}`);
+            state.spatialGrid = new SpatialHashGrid<PointData>(SPATIAL_GRID_CELL_SIZE);
+        }
 
-        if (!state?.boardConfig) {
+        // Ensure boardConfig exists and mark as infinite (temporary assumption)
+        if (!state.boardConfig) {
             state = {
                 ...state,
                 boardConfig: {
@@ -44,25 +48,23 @@ export class GameStateService {
                     rows: 0,
                     cols: 0,
                     mines: 0,
-                    // Add other default board config properties if needed
                 },
             }
         }
         state.boardConfig.isInfiniteWorld = true; // Assuming all games are infinite for now
-        this.ensureWorldGeneratorInitialized(gameId);
+
+        // No need to explicitly initialize generator here anymore
         this.games.set(gameId, state);
     }
 
     /**
-     * Remove a game from memory and clear associated caches/state.
+     * Remove a game from memory and clear associated generator instance.
      */
     removeGame(gameId: string): void {
         this.games.delete(gameId);
-        this.worldGeneratorsInitialized.delete(gameId);
-        // Potentially add cleanup for worldGenerator caches if they become game-specific
-        // Currently, initializeWorldGenerator clears the shared cache, which might
-        // not be ideal if multiple games run concurrently in one process.
-        // Consider refactoring worldGenerator to encapsulate state per seed.
+        // Remove the corresponding world generator instance
+        this.worldGenerators.delete(gameId);
+        console.log(`Removed game ${gameId} and its world generator instance.`);
     }
 
     /**
@@ -73,44 +75,40 @@ export class GameStateService {
     }
 
     /**
-     * Ensures the world generator is initialized for the given game seed.
-     * This is crucial before calling isMine or getCellValue.
+     * Gets the WorldGenerator instance for the given gameId (seed).
+     * Creates a new instance if one doesn't exist for the seed.
+     * This ensures each game uses its own isolated generator state.
+     * @param gameId The game ID, used as the seed for the generator.
+     * @returns The WorldGenerator instance for the game.
      */
-    private ensureWorldGeneratorInitialized(gameId: string): void {
-        // WARNING: Current worldGenerator uses a shared global state (rng, noise2D, caches).
-        // Calling initializeWorldGenerator resets this state. This is NOT suitable
-        // for multiple concurrent games in the same process. It needs refactoring
-        // to encapsulate state per gameId/seed if concurrency is required.
-        // For now, we assume one game or sequential games, or accept cache clearing.
-        if (!this.worldGeneratorsInitialized.has(gameId)) {
-            console.warn(`Initializing world generator for game ${gameId}. Concurrent games might interfere.`);
-            initializeWorldGenerator(gameId);
-            this.worldGeneratorsInitialized.add(gameId);
+    private getWorldGenerator(gameId: string): WorldGenerator {
+        if (!this.worldGenerators.has(gameId)) {
+            console.log(`Creating new WorldGenerator instance for game: ${gameId}`);
+            const newGenerator = new WorldGenerator(gameId);
+            this.worldGenerators.set(gameId, newGenerator);
         }
+        return this.worldGenerators.get(gameId)!;
     }
 
     /**
      * Implementation of the GetCellFunction type.
      * Retrieves the full state of a cell by combining generated properties
-     * with stored state (revealed/flagged) from the SpatialHashGrid.
-     * Handles initialization of the world generator.
+     * (using the game-specific WorldGenerator) with stored state
+     * from the SpatialHashGrid.
      */
     getCell: GetCellFunction = async (gameState: GameState, x: number, y: number): Promise<Cell | null> => {
         if (!gameState.boardConfig.isInfiniteWorld || !gameState.spatialGrid) {
-            // Handle fixed boards or error if grid is missing for infinite game
             console.error(`Attempted to get cell for non-infinite game or missing grid: ${gameState.gameId}`);
-            // TODO: Implement logic for fixed boards if needed
             return null;
         }
 
-        // Ensure the generator is ready for this specific game
-        // Note: See warning in ensureWorldGeneratorInitialized about concurrency
-        this.ensureWorldGeneratorInitialized(gameState.gameId);
+        // Get the correct generator instance for this game
+        const generator = this.getWorldGenerator(gameState.gameId);
 
-        // 1. Get inherent properties from world generator
-        const cellValue = getCellValue(x, y);
+        // 1. Get inherent properties from the game-specific world generator instance
+        const cellValue = generator.getCellValue(x, y); // Use instance method
         const mine = cellValue === 'M';
-        const adjacentMines = mine ? 0 : cellValue; // Adjacent mines count is 0 if it's a mine itself
+        const adjacentMines = mine ? 0 : cellValue;
 
         // 2. Get revealed/flagged state from spatial grid
         const pointData = gameState.spatialGrid.get(x, y);

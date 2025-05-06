@@ -51,7 +51,7 @@ docker-compose -f docker-compose.sidecar-tests.yml up
 
 Based on the code review conducted in Session 27, the following items need addressing:
 
--   **[Critical] Refactor `worldGenerator.ts` for Concurrency:**
+-   **[Current Session] [Critical] Refactor `worldGenerator.ts` for Concurrency:**
     -   Modify `worldGenerator.ts` to encapsulate its state (RNG, noise function, caches) instead of using shared global variables.
     -   This could involve creating a class or factory function that returns a generator instance seeded per gameId.
     -   Update `GameStateService` to manage these per-game generator instances.

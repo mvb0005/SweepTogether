@@ -28,7 +28,14 @@ At the end of each development session, follow these steps to ensure proper docu
   cd /backend && npx jest [path/to/tests] --coverage
   ```
 
-### 3. Documentation Update
+### 3. Code Review (Optional but Recommended)
+- Invoke the **Code Reviewer** persona (`agent_personas/code_reviewer.md`) to review the code changes made during the session.
+- Use a prompt similar to the one in `prompts/SESSION_27_Backend_Code_Review.md`, but scope it to the specific files/features modified in the current session.
+- Analyze the feedback provided by the reviewer.
+- Incorporate straightforward fixes immediately.
+- Add more complex feedback or larger refactoring suggestions as action items to `TODO.md` for a future session.
+
+### 4. Documentation Update
 - Add a summary entry to SESSIONS.md following the established format:
   ```markdown
   ## Session XX: [Title](./prompts/SESSION_XX_Title.md) (YYYY-MM-DD)
@@ -37,7 +44,7 @@ At the end of each development session, follow these steps to ensure proper docu
 - The description should highlight key accomplishments, design decisions, and learnings
 - Ensure the session title matches the prompt file name for consistency
 
-### 4. Session File
+### 5. Session File
 - If not already created, add a session file in the `prompts/` directory using the standard format:
   ```markdown
   # Session XX: Title
@@ -49,7 +56,7 @@ At the end of each development session, follow these steps to ensure proper docu
   [Document what was accomplished, key decisions, challenges, etc.]
   ```
 
-### 5. Commit Guidelines (if committing code)
+### 6. Commit Guidelines (if committing code)
 - Use format: `Session XX: Brief description of changes`
 - Include relevant details about implementation approach
 - Reference any issues or tickets being addressed

@@ -12,7 +12,12 @@ import {
   GameConfig,
   LeaderboardCategory,
   LeaderboardMetric,
-  PlayerStatus
+  PlayerStatus,
+  Player,
+  BoardStateUpdatePayload,
+  ScoreUpdatePayload,
+  GameOverPayload,
+  LeaderboardUpdatePayload
 } from '../../domain/types';
 import { socketEvents } from './socketEvents';
 
@@ -56,11 +61,11 @@ function handleDisconnect(socket: Socket): void {
   
   const player = activePlayers.get(socket.id);
   if (player) {
-    // Update player status to offline
-    gameStateService.updatePlayerStatus(
+    // Update player status to LOCKED_OUT instead of OFFLINE
+    gameStateService.setPlayerStatus(
       player.gameId, 
       player.playerId, 
-      PlayerStatus.OFFLINE
+      PlayerStatus.LOCKED_OUT
     );
     
     // Emit player left event to game room
@@ -325,19 +330,19 @@ function registerLeaderboardEvents(socket: Socket): void {
 
 function subscribeToGameEvents(io: Server): void {
   // Subscribe to board updates
-  eventBus.subscribe('boardUpdated', (data) => {
+  eventBus.subscribe('boardUpdated', (data: BoardStateUpdatePayload) => {
     const { gameId, cells } = data;
     io.to(gameId).emit(socketEvents.BOARD_UPDATE, { gameId, cells });
   });
   
   // Subscribe to score updates
-  eventBus.subscribe('scoreUpdated', (data) => {
+  eventBus.subscribe('scoreUpdated', (data: ScoreUpdatePayload) => {
     const { gameId, playerId, score } = data;
     io.to(gameId).emit(socketEvents.SCORE_UPDATE, { gameId, playerId, score });
   });
   
   // Subscribe to game over events
-  eventBus.subscribe('gameOver', (data) => {
+  eventBus.subscribe('gameOver', (data: GameOverPayload) => {
     const { gameId, winner, minePositions } = data;
     io.to(gameId).emit(socketEvents.GAME_OVER, { 
       gameId, 
@@ -347,7 +352,7 @@ function subscribeToGameEvents(io: Server): void {
   });
   
   // Subscribe to leaderboard updates
-  eventBus.subscribe('leaderboardUpdated', (data) => {
+  eventBus.subscribe('leaderboardUpdated', (data: LeaderboardUpdatePayload) => {
     const { category, metric, entries } = data;
     io.emit(socketEvents.LEADERBOARD_UPDATED, { 
       category, 
