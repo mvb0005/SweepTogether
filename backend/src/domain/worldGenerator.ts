@@ -2,7 +2,7 @@ import { createNoise2D } from 'simplex-noise';
 import seedrandom, { PRNG } from 'seedrandom';
 
 // TODO: Make density configurable
-const MINE_DENSITY_THRESHOLD = 0.85; // Adjust this value (0 to 1). Higher = fewer mines.
+const MINE_DENSITY_THRESHOLD = 0.9; // Adjust this value (0 to 1). Higher = fewer mines.
 const MAX_CACHE_SIZE = 10000;
 const MAX_CELL_VALUE_CACHE_SIZE = 5000;
 

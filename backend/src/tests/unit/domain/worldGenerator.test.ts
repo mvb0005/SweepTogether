@@ -2,7 +2,6 @@ import { WorldGenerator, Noise2DFunction } from '../../../domain/worldGenerator'
 
 describe('WorldGenerator', () => {
     const TEST_SEED = 'test-seed';
-    const ANOTHER_SEED = 'another-seed';
 
     describe('constructor', () => {
         it('should produce the same world for the same seed when using default noise', () => {
@@ -15,19 +14,27 @@ describe('WorldGenerator', () => {
         });
 
         it('should use the provided noise function', () => {
-            const mockNoiseFn: Noise2DFunction = jest.fn((x, y) => {
-                if (x === 0 && y === 0) return 0.0; // Will not be a mine
-                if (x === 1 && y === 1) return 0.9; // Will be a mine (assuming threshold < 1.0)
-                return 0.0;
+            // First mock function and generator instance
+            const mockNoiseFn1: Noise2DFunction = jest.fn((x, y) => {
+                if (x === 0 && y === 0) return 0.0;  // Scaled: (0.0+1)/2 = 0.5. Not a mine (threshold 0.1)
+                if (x === 1 && y === 1) return -0.9; // Scaled: (-0.9+1)/2 = 0.05. IS a mine (threshold 0.1)
+                return 0.0; // Default for other cells not explicitly tested here
             });
-            const generator = new WorldGenerator(TEST_SEED, mockNoiseFn);
+            const generator1 = new WorldGenerator(TEST_SEED, mockNoiseFn1);
 
+            // Assertions for the first generator instance
+            expect(generator1.isMine(0, 0)).toBe(false);
+            expect(generator1.isMine(1, 1)).toBe(true);
+            expect(mockNoiseFn1).toHaveBeenCalledWith(0, 0);
+            expect(mockNoiseFn1).toHaveBeenCalledWith(1, 1);
+
+            // Second mock function and generator instance
             const mockNoiseFn2: Noise2DFunction = jest.fn((x, y) => {
-                if (x === 0 && y === 0) return 0.8; // Not a mine
-                if (x === 1 && y === 1) return -0.8; // Is a mine
-                return 0.0;
+                if (x === 0 && y === 0) return 0.8; // Not a mine: scaled = (0.8+1)/2 = 0.9. 0.9 < 0.1 is false.
+                if (x === 1 && y === 1) return -0.9; // Is a mine: scaled = (-0.9+1)/2 = 0.05. 0.05 < 0.1 is true.
+                return 0.0; // Default for other cells
             });
-            const generatorWithSpecificNoise = new WorldGenerator('test', mockNoiseFn2);
+            const generatorWithSpecificNoise = new WorldGenerator('test', mockNoiseFn2); // Using 'test' seed as original
             expect(generatorWithSpecificNoise.isMine(0,0)).toBe(false);
             expect(generatorWithSpecificNoise.isMine(1,1)).toBe(true);
             expect(mockNoiseFn2).toHaveBeenCalledWith(0,0);
@@ -51,8 +58,8 @@ describe('WorldGenerator', () => {
 
         it('should return different mine statuses based on mock noise function', () => {
             const mockNoiseFn: Noise2DFunction = jest.fn((x, y) => {
-                if (x === 0 && y === 0) return 0.8; // Not a mine
-                if (x === 1000 && y === 1000) return -0.8; // Is a mine
+                if (x === 0 && y === 0) return 0.8; // Not a mine: scaled = (0.8+1)/2 = 0.9. 0.9 < 0.1 is false.
+                if (x === 1000 && y === 1000) return -0.9; // Is a mine: scaled = (-0.9+1)/2 = 0.05. 0.05 < 0.1 is true.
                 return 0.0;
             });
             const generator = new WorldGenerator(TEST_SEED, mockNoiseFn);
@@ -113,14 +120,42 @@ describe('WorldGenerator', () => {
 
         it('should return different cell values based on mock noise function', () => {
             const mockNoiseFn: Noise2DFunction = jest.fn((x, y) => {
-                if (x === 0 && y === 0) return 0.8; // (0,0) not a mine
-                if (x === -1 && y === -1) return -0.8; // (-1,-1) is a mine
-                if (x === 1 && y === 1) return 0.8; // (1,1) not a mine
-                return 0.5; // Default to not a mine for other cells
+                // (0,0) is NOT a mine. scaled = (0.8+1)/2 = 0.9. 0.9 < 0.1 is false.
+                if (x === 0 && y === 0) return 0.8;
+                // (-1,-1) IS a mine. scaled = (-0.9+1)/2 = 0.05. 0.05 < 0.1 is true.
+                if (x === -1 && y === -1) return -0.9;
+                // (1,1) is NOT a mine. scaled = (0.8+1)/2 = 0.9. 0.9 < 0.1 is false.
+                if (x === 1 && y === 1) return 0.8;
+                // Default to NOT a mine for other cells for simplicity in this test
+                return 0.5; // scaled = (0.5+1)/2 = 0.75. 0.75 < 0.1 is false.
             });
             const generatorWithMockNoise = new WorldGenerator(TEST_SEED, mockNoiseFn);
             
+            // For (0,0):
+            // Neighbors:
+            // (-1,-1): mine (mock returns -0.9)
+            // (0,-1): not mine (mock returns 0.5)
+            // (1,-1): not mine (mock returns 0.5)
+            // (-1,0): not mine (mock returns 0.5)
+            // (1,0): not mine (mock returns 0.5)
+            // (-1,1): not mine (mock returns 0.5)
+            // (0,1): not mine (mock returns 0.5)
+            // (1,1): not mine (mock returns 0.8)
+            // Expected count for (0,0) is 1.
             expect(generatorWithMockNoise.getCellValue(0,0)).toBe(1);
+
+            // For (1,1):
+            // (1,1) is not a mine (mock returns 0.8)
+            // Neighbors:
+            // (0,0): not mine (mock returns 0.8)
+            // (1,0): not mine (mock returns 0.5)
+            // (2,0): not mine (mock returns 0.5)
+            // (0,1): not mine (mock returns 0.5)
+            // (2,1): not mine (mock returns 0.5)
+            // (0,2): not mine (mock returns 0.5)
+            // (1,2): not mine (mock returns 0.5)
+            // (2,2): not mine (mock returns 0.5)
+            // Expected count for (1,1) is 0.
             expect(generatorWithMockNoise.getCellValue(1,1)).toBe(0);
         });
     });

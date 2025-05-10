@@ -12,8 +12,9 @@
     "baseUrl": "./src", // Added baseUrl
     "paths": {         // Added paths
       "@/*": ["*"]
-    }
+    },
+    "types": ["jest", "node"] // Explicitly include types for Jest and Node
   },
-  "include": ["src/**/*"], // Specifies the files to include in the program
-  "exclude": ["node_modules", "**/*.spec.ts"] // Specifies the files to exclude
+  "include": ["src/**/*", "test/**/*.ts"], // Include both src and test files
+  "exclude": ["node_modules"] // Updated exclude, .spec.ts was not needed as we use .test.ts
 }

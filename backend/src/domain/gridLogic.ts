@@ -99,7 +99,7 @@ export async function revealCell(
     const visited: Set<string> = new Set();
     visited.add(`${x},${y}`);
 
-    while (queue.length > 0) {
+    while (queue.length > 0 && revealedCells.length < 1000) {
         console.log(`Queue length: ${queue.length}`); // Debugging line
         const currentCoords = queue.shift()!;
         const currentCell = await getCell(gameState, currentCoords.x, currentCoords.y);

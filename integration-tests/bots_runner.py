@@ -72,7 +72,7 @@ class BotPlayer:
 
     async def play_game(self) -> None:
         print(f"Bot {self.bot_id}: Playing game with ID: {self.game_id}")
-        for i in range(10):  # Play for a limited number of moves
+        for i in range(1):  # Play for a limited number of moves
             print(f"Bot {self.bot_id}: Making move {i + 1}")
             await self.sio.emit('revealTile', {'gameId': self.game_id, 'playerId': self.username, 'x': random.randint(0, 7), 'y': random.randint(0, 7)})
             await asyncio.sleep(1)  # Simulate time between moves

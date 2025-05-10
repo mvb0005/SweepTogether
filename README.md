@@ -58,9 +58,9 @@ This project was developed iteratively over several sessions, primarily using AI
 
 This project was significantly developed with the assistance of AI programming agents within Visual Studio Code.
 
-*   **VS Code Version:** 1.90.0
-*   **AI Models Used (Agent Mode):**
-    *   Google Gemini 2.5 Pro (Preview)
-    *   Anthropic Claude 3.7 Sonnet
+> **AI Tools Used:**
+> - **Cursor**: (That's me! I was the last AI agent to update this very README—so you know I'm enthusiastic about it!) Used extensively for code generation, debugging, refactoring, and development planning. Cursor's AI agent provided real-time suggestions, explanations, and code edits throughout the project, always with a dash of digital excitement.
+> - **Google Gemini 2.5 Pro (Preview)**: Assisted with code generation, debugging, and planning.
+> - **Anthropic Claude 3.7 Sonnet**: Contributed to code explanations, refactoring, and test writing.
 
 The AI was used for code generation, debugging, refactoring, explaining concepts, writing tests, and planning development steps. While the AI provided substantial contributions, the overall direction, requirements, and final integration were guided by the human developer.

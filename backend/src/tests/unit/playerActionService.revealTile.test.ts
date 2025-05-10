@@ -35,7 +35,24 @@ import * as gridLogic from '../../domain/gridLogic';
 // Mock dependencies
 jest.mock('../../domain/gridLogic');
 jest.mock('../../application/scoreService');
-const mockedGridLogic = gridLogic as jest.Mocked<typeof gridLogic>;
+
+// Define mock instances for Chunk and BoardManager
+const mockChunkInstance = {
+  revealCell: jest.fn(),
+  flagCell: jest.fn(),
+  chordCell: jest.fn(),
+  getCell: jest.fn(),
+  getTile: jest.fn(),
+  addPendingFill: jest.fn(), // Added addPendingFill
+};
+
+const mockBoardManagerInstance = {
+  revealTile: jest.fn(),
+  flagTile: jest.fn(),
+  chordTile: jest.fn(),
+  convertGlobalToChunkLocalCoordinates: jest.fn(),
+  getChunk: jest.fn().mockReturnValue(mockChunkInstance),
+};
 
 describe('PlayerActionService', () => {
   // Mock objects
@@ -68,8 +85,8 @@ describe('PlayerActionService', () => {
       mineHitPenalty: 100,
       lockoutDurationMs: 5000,
       mineRevealDelayMs: 3000,
-      flagPlacePoints: 2,     // Points for placing a flag
-      flagRemovePoints: 0     // Points for removing a flag
+      flagPlacePoints: 2,
+      flagRemovePoints: 0
     },
     spatialGrid: {
       get: jest.fn(),
@@ -81,7 +98,20 @@ describe('PlayerActionService', () => {
   beforeEach(() => {
     // Reset mocks
     jest.clearAllMocks();
-    
+
+    // Explicitly reset methods on our plain mock objects
+    mockBoardManagerInstance.revealTile.mockReset();
+    mockBoardManagerInstance.flagTile.mockReset();
+    mockBoardManagerInstance.chordTile.mockReset();
+    mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates.mockReset();
+    mockBoardManagerInstance.getChunk.mockReset().mockReturnValue(mockChunkInstance);
+    mockChunkInstance.revealCell.mockReset();
+    mockChunkInstance.flagCell.mockReset();
+    mockChunkInstance.chordCell.mockReset();
+    mockChunkInstance.getCell.mockReset();
+    mockChunkInstance.getTile.mockReset().mockResolvedValue({ x: 0, y: 0, isMine: false, revealed: false, flagged: false, adjacentMines: 0 });
+    mockChunkInstance.addPendingFill.mockReset(); // Added reset for addPendingFill
+
     // Set up mock objects
     mockEventBus = {
       subscribe: jest.fn(),
@@ -92,7 +122,9 @@ describe('PlayerActionService', () => {
       getGame: jest.fn().mockReturnValue(mockGame),
       getCell: jest.fn(),
       updateGridCell: jest.fn(),
-      updateGridCells: jest.fn()
+      updateGridCells: jest.fn(),
+      getBoardManager: jest.fn().mockReturnValue(mockBoardManagerInstance),
+      setPlayerStatus: jest.fn(),
     };
     
     mockGameUpdateService = {
@@ -103,18 +135,15 @@ describe('PlayerActionService', () => {
       sendTilesUpdate: jest.fn()
     };
     
-    // Create proper Jest mock for ScoreService
     mockScoreService = {
       handleCellReveal: jest.fn(),
       handleMineHit: jest.fn(),
       handleFlagToggle: jest.fn()
     } as unknown as jest.Mocked<ScoreService>;
 
-    // Set return values for the mock functions
-    mockScoreService.handleCellReveal.mockReturnValue(10); // Default return for single cell reveal
-    mockScoreService.handleMineHit.mockReturnValue(-100); // Default return for mine hit
+    mockScoreService.handleCellReveal.mockReturnValue(10);
+    mockScoreService.handleMineHit.mockReturnValue(-100);
 
-    // Initialize the service with mocks
     playerActionService = new PlayerActionService(
       mockEventBus,
       mockGameStateService as any,
@@ -124,16 +153,13 @@ describe('PlayerActionService', () => {
   });
   
   describe('handleRevealTile', () => {
-    // Extract the bound handler function from the event subscription
     let handleRevealTile: (payload: SocketEventMap['revealTile']) => Promise<void>;
     
     beforeEach(() => {
-      // Get the bound handler function
       handleRevealTile = mockEventBus.subscribe.mock.calls.find(
         call => call[0] === 'revealTile'
       )?.[1] as (payload: SocketEventMap['revealTile']) => Promise<void>;
       
-      // Set up base game state with an active player
       const testPlayer: Player = {
         id: socketId,
         username: 'Test Player',
@@ -147,7 +173,6 @@ describe('PlayerActionService', () => {
     });
     
     it('should reveal a non-mine cell successfully', async () => {
-      // Arrange
       const x = 5, y = 5;
       const revealedCell: Cell = {
         x, y,
@@ -157,35 +182,26 @@ describe('PlayerActionService', () => {
         flagged: false
       };
       
-      // Mock gridLogic.revealCell to return an array with one non-mine cell
-      mockedGridLogic.revealCell.mockResolvedValue([revealedCell]);
+      mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates.mockReturnValue({
+        chunkCoordinate: { x: 0, y: 0 },
+        localCoordinate: { x: 5, y: 5 }
+      });
+      mockChunkInstance.revealCell.mockResolvedValue([revealedCell]);
       
-      // Act
       await handleRevealTile({ gameId, socketId, x, y });
       
-      // Assert
-      // Check if revealCell was called with the right parameters
-      expect(mockedGridLogic.revealCell).toHaveBeenCalledWith(
-        mockGame,
-        x,
-        y,
-        mockGameStateService.getCell
-      );
-      
-      // Check if game state was updated
+      expect(mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates).toHaveBeenCalledWith(x, y);
+      expect(mockBoardManagerInstance.getChunk).toHaveBeenCalledWith(0, 0);
+      expect(mockChunkInstance.revealCell).toHaveBeenCalledWith(5, 5, false);
       expect(mockGameStateService.updateGridCells).toHaveBeenCalledWith(
         gameId,
         [revealedCell]
       );
-      
-      // Check if score service was called
       expect(mockScoreService.handleCellReveal).toHaveBeenCalledWith(
         gameId,
         socketId,
         [revealedCell]
       );
-      
-      // Check if tile update was sent
       expect(mockGameUpdateService.sendTilesUpdate).toHaveBeenCalledWith(
         gameId,
         [expect.objectContaining({ 
@@ -198,7 +214,6 @@ describe('PlayerActionService', () => {
     });
     
     it('should handle revealing a mine cell correctly', async () => {
-      // Arrange
       const x = 5, y = 5;
       const hitMineCell: Cell = {
         x, y,
@@ -208,37 +223,31 @@ describe('PlayerActionService', () => {
         flagged: false
       };
       
-      // Mock revealCell to return a MineHitResult
-      mockedGridLogic.revealCell.mockResolvedValue({ hitMine: hitMineCell });
+      mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates.mockReturnValue({
+        chunkCoordinate: { x: 0, y: 0 },
+        localCoordinate: { x: 5, y: 5 }
+      });
+      mockChunkInstance.revealCell.mockResolvedValue({ hitMine: hitMineCell });
       
-      // Act
       await handleRevealTile({ gameId, socketId, x, y });
       
-      // Assert
-      // Check if revealCell was called
-      expect(mockedGridLogic.revealCell).toHaveBeenCalled();
-      
-      // Check if player status was updated to locked out
+      expect(mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates).toHaveBeenCalledWith(x, y);
+      expect(mockBoardManagerInstance.getChunk).toHaveBeenCalledWith(0, 0);
+      expect(mockChunkInstance.revealCell).toHaveBeenCalledWith(5, 5, false);
       expect(mockGameUpdateService.sendPlayerStatusUpdate).toHaveBeenCalledWith(
         gameId,
         socketId,
         PlayerStatus.LOCKED_OUT,
-        expect.any(Number) // lockoutUntil timestamp
+        expect.any(Number)
       );
-      
-      // Check if score service was called
       expect(mockScoreService.handleMineHit).toHaveBeenCalledWith(
         gameId,
         socketId
       );
-      
-      // Check if mine cell was updated
       expect(mockGameStateService.updateGridCell).toHaveBeenCalledWith(
         gameId,
         hitMineCell
       );
-      
-      // Check if tile update was sent with mine data
       expect(mockGameUpdateService.sendTileUpdate).toHaveBeenCalledWith(
         gameId,
         expect.objectContaining({
@@ -251,9 +260,7 @@ describe('PlayerActionService', () => {
     });
     
     it('should handle flood fill when revealing a cell with 0 adjacentMines', async () => {
-      // Arrange
       const x = 5, y = 5;
-      // Create multiple cells for flood fill simulation
       const floodFillCells: Cell[] = [
         { x: 5, y: 5, isMine: false, adjacentMines: 0, revealed: true, flagged: false },
         { x: 4, y: 5, isMine: false, adjacentMines: 0, revealed: true, flagged: false },
@@ -262,31 +269,27 @@ describe('PlayerActionService', () => {
         { x: 5, y: 6, isMine: false, adjacentMines: 0, revealed: true, flagged: false }
       ];
       
-      // Mock revealCell to return multiple cells (flood fill)
-      mockedGridLogic.revealCell.mockResolvedValue(floodFillCells);
-      mockScoreService.handleCellReveal.mockReturnValue(50); // 5 cells * 10 points
+      mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates.mockReturnValue({
+        chunkCoordinate: { x: 0, y: 0 },
+        localCoordinate: { x: 5, y: 5 }
+      });
+      mockChunkInstance.revealCell.mockResolvedValue(floodFillCells);
+      mockScoreService.handleCellReveal.mockReturnValue(50);
       
-      // Act
       await handleRevealTile({ gameId, socketId, x, y });
       
-      // Assert
-      // Check if revealCell was called
-      expect(mockedGridLogic.revealCell).toHaveBeenCalled();
-      
-      // Check if all cells were updated
+      expect(mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates).toHaveBeenCalledWith(x, y);
+      expect(mockBoardManagerInstance.getChunk).toHaveBeenCalledWith(0, 0);
+      expect(mockChunkInstance.revealCell).toHaveBeenCalledWith(5, 5, false);
       expect(mockGameStateService.updateGridCells).toHaveBeenCalledWith(
         gameId,
         floodFillCells
       );
-      
-      // Check if score service was called with all cells
       expect(mockScoreService.handleCellReveal).toHaveBeenCalledWith(
         gameId,
         socketId,
         floodFillCells
       );
-      
-      // Check if updates for all tiles were sent
       expect(mockGameUpdateService.sendTilesUpdate).toHaveBeenCalledWith(
         gameId,
         expect.arrayContaining([
@@ -300,42 +303,37 @@ describe('PlayerActionService', () => {
     });
     
     it('should do nothing when revealing an already revealed cell', async () => {
-      // Arrange
       const x = 5, y = 5;
       
-      // Mock revealCell to return an empty array (nothing to reveal)
-      mockedGridLogic.revealCell.mockResolvedValue([]);
+      mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates.mockReturnValue({
+        chunkCoordinate: { x: 0, y: 0 },
+        localCoordinate: { x: 5, y: 5 }
+      });
+      mockChunkInstance.revealCell.mockResolvedValue([]);
       
-      // Act
       await handleRevealTile({ gameId, socketId, x, y });
       
-      // Assert
-      expect(mockedGridLogic.revealCell).toHaveBeenCalled();
-      
-      // None of the update methods should be called
+      expect(mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates).toHaveBeenCalledWith(x, y);
+      expect(mockBoardManagerInstance.getChunk).toHaveBeenCalledWith(0, 0);
+      expect(mockChunkInstance.revealCell).toHaveBeenCalledWith(5, 5, false);
       expect(mockGameStateService.updateGridCells).not.toHaveBeenCalled();
       expect(mockGameUpdateService.sendScoreUpdate).not.toHaveBeenCalled();
       expect(mockGameUpdateService.sendTilesUpdate).not.toHaveBeenCalled();
     });
     
     it('should not allow action when player is locked out', async () => {
-      // Arrange
       const x = 5, y = 5;
       
-      // Set player status to locked out
       mockGame.players[socketId].status = PlayerStatus.LOCKED_OUT;
-      mockGame.players[socketId].lockedUntil = Date.now() + 5000; // Locked for 5 more seconds
+      mockGame.players[socketId].lockedUntil = Date.now() + 5000;
       
-      // Act
       await handleRevealTile({ gameId, socketId, x, y });
       
-      // Assert
-      // Should not call revealCell
-      expect(mockedGridLogic.revealCell).not.toHaveBeenCalled();
+      expect(mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates).not.toHaveBeenCalled();
+      expect(mockChunkInstance.revealCell).not.toHaveBeenCalled();
     });
     
     it('should unlock player if lockout period has expired', async () => {
-      // Arrange
       const x = 5, y = 5;
       const revealedCell: Cell = {
         x, y,
@@ -345,77 +343,83 @@ describe('PlayerActionService', () => {
         flagged: false
       };
       
-      // Set player status to locked out but with expired lock time
       mockGame.players[socketId].status = PlayerStatus.LOCKED_OUT;
-      mockGame.players[socketId].lockedUntil = Date.now() - 1000; // Lock expired 1 second ago
+      mockGame.players[socketId].lockedUntil = Date.now() - 1000;
       
-      // Mock revealCell to return a non-mine cell
-      mockedGridLogic.revealCell.mockResolvedValue([revealedCell]);
+      mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates.mockReturnValue({
+        chunkCoordinate: { x: 0, y: 0 },
+        localCoordinate: { x: 5, y: 5 }
+      });
+      mockChunkInstance.revealCell.mockResolvedValue([revealedCell]);
       
-      // Act
       await handleRevealTile({ gameId, socketId, x, y });
       
-      // Assert
-      // Player status should be updated to ACTIVE
       expect(mockGameUpdateService.sendPlayerStatusUpdate).toHaveBeenCalledWith(
         gameId,
         socketId,
         PlayerStatus.ACTIVE
       );
-      
-      // revealCell should be called after player is unlocked
-      expect(mockedGridLogic.revealCell).toHaveBeenCalled();
+      expect(mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates).toHaveBeenCalledWith(x, y);
+      expect(mockBoardManagerInstance.getChunk).toHaveBeenCalledWith(0, 0);
+      expect(mockChunkInstance.revealCell).toHaveBeenCalledWith(5, 5, false);
     });
     
     it('should handle gracefully when game is not found', async () => {
-      // Arrange
       const x = 5, y = 5;
       
-      // Mock getGame to return undefined (game not found)
       (mockGameStateService.getGame as jest.Mock).mockReturnValueOnce(undefined);
       
-      // Act
       await handleRevealTile({ gameId, socketId, x, y });
       
-      // Assert
-      // Should send error
       expect(mockGameUpdateService.sendError).toHaveBeenCalledWith(
         socketId,
         'Game not found.'
       );
-      
-      // Should not call revealCell
-      expect(mockedGridLogic.revealCell).not.toHaveBeenCalled();
+      expect(mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates).not.toHaveBeenCalled();
+      expect(mockChunkInstance.revealCell).not.toHaveBeenCalled();
     });
     
     it('should handle gracefully when player is not found in game', async () => {
-      // Arrange
       const x = 5, y = 5;
       const nonExistentSocketId = 'non-existent-socket-id';
       
-      // Act
       await handleRevealTile({ gameId, socketId: nonExistentSocketId, x, y });
       
-      // Assert
-      // Should not call revealCell
-      expect(mockedGridLogic.revealCell).not.toHaveBeenCalled();
+      expect(mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates).not.toHaveBeenCalled();
+      expect(mockChunkInstance.revealCell).not.toHaveBeenCalled();
     });
     
-    it('should handle error during revealCell call', async () => {
-      // Arrange
+    it('should handle error during revealCell call if boardManager.getChunk returns undefined', async () => {
       const x = 5, y = 5;
-      
-      // Mock revealCell to throw an error
-      mockedGridLogic.revealCell.mockRejectedValue(new Error('Test error'));
-      
-      // Act
+      mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates.mockReturnValue({
+        chunkCoordinate: { x: 0, y: 0 },
+        localCoordinate: { x: 5, y: 5 }
+      });
+      mockBoardManagerInstance.getChunk.mockReturnValueOnce(undefined as any);
+
       await handleRevealTile({ gameId, socketId, x, y });
-      
-      // Assert
-      // Should send error
+
       expect(mockGameUpdateService.sendError).toHaveBeenCalledWith(
         socketId,
-        'Failed to reveal tile'
+        'Internal server error: Target chunk not found.' // Corrected error message
+      );
+      expect(mockChunkInstance.revealCell).not.toHaveBeenCalled();
+    });
+    
+    it('should handle error during chunk.revealCell call', async () => {
+      const x = 5, y = 5;
+      
+      mockBoardManagerInstance.convertGlobalToChunkLocalCoordinates.mockReturnValue({
+        chunkCoordinate: { x: 0, y: 0 },
+        localCoordinate: { x: 5, y: 5 }
+      });
+      mockChunkInstance.revealCell.mockRejectedValue(new Error('Chunk reveal error'));
+      
+      await handleRevealTile({ gameId, socketId, x, y });
+      
+      expect(mockGameUpdateService.sendError).toHaveBeenCalledWith(
+        socketId,
+        'Failed to reveal tile.'
       );
     });
   });

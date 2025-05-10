@@ -10,6 +10,8 @@ import { GameState, Cell, Coordinates, PointData, GameConfig, PlayerStatus } fro
 import { SpatialHashGrid } from '../domain/spatialHashGrid';
 // Import the WorldGenerator class instead of the old functions
 import { WorldGenerator } from '../domain/worldGenerator';
+import { BoardManager } from '../domain/BoardManager'; // Import BoardManager
+import { IBoardManager, CHUNK_SIZE } from '../types/chunkTypes'; // Import IBoardManager and CHUNK_SIZE
 import { GetCellFunction } from '../domain/game';
 
 // Define a reasonable cell size for the spatial hash grid chunks
@@ -19,6 +21,7 @@ export class GameStateService {
     private games: Map<string, GameState> = new Map();
     // Use a Map to store WorldGenerator instances per gameId (seed)
     private worldGenerators: Map<string, WorldGenerator> = new Map();
+    private boardManagers: Map<string, IBoardManager> = new Map(); // Added for BoardManager instances
 
     /**
      * Get the game state for a given gameId.
@@ -64,6 +67,7 @@ export class GameStateService {
         this.games.delete(gameId);
         // Remove the corresponding world generator instance
         this.worldGenerators.delete(gameId);
+        this.boardManagers.delete(gameId); // Remove BoardManager instance
         console.log(`Removed game ${gameId} and its world generator instance.`);
     }
 
@@ -88,6 +92,34 @@ export class GameStateService {
             this.worldGenerators.set(gameId, newGenerator);
         }
         return this.worldGenerators.get(gameId)!;
+    }
+
+    /**
+     * Gets the BoardManager instance for the given gameId.
+     * Creates a new instance if one doesn't exist for the game.
+     * @param gameId The game ID.
+     * @returns The IBoardManager instance for the game.
+     */
+    public getBoardManager(gameId: string): IBoardManager {
+        if (!this.boardManagers.has(gameId)) {
+            console.log(`Creating new BoardManager instance for game: ${gameId}`);
+            const worldGen = this.getWorldGenerator(gameId);
+            const cellGenerator = (globalX: number, globalY: number): Cell => {
+                const cellValue = worldGen.getCellValue(globalX, globalY);
+                const isMine = cellValue === 'M';
+                return {
+                    x: globalX,
+                    y: globalY,
+                    isMine: isMine,
+                    adjacentMines: isMine ? 0 : cellValue as number,
+                    revealed: false,
+                    flagged: false,
+                };
+            };
+            const newBoardManager = new BoardManager(CHUNK_SIZE, cellGenerator);
+            this.boardManagers.set(gameId, newBoardManager);
+        }
+        return this.boardManagers.get(gameId)!;
     }
 
     /**
@@ -195,6 +227,8 @@ export class GameStateService {
             spatialGrid: new SpatialHashGrid<PointData>(SPATIAL_GRID_CELL_SIZE),
         };
         this.setGame(gameId, newGame);
+        // Ensure a BoardManager is created when a game is created
+        this.getBoardManager(gameId);
     }
 
     /**

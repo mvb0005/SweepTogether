@@ -87,5 +87,7 @@ Planning session to identify and prioritize the remaining components needed to c
 Created a Code Reviewer persona and used it to conduct a review of the backend codebase (`backend/src/`). The review identified strengths in architecture and maintainability but found a critical issue with shared state in `worldGenerator.ts` preventing safe concurrency. Recommendations include refactoring `worldGenerator`, adding linting, refactoring `PlayerActionService`, and adding input validation. Action items added to `TODO.md`.
 
 ## Session 28: [Refactor World Generator for Concurrency](./prompts/SESSION_28_Refactor_World_Generator.md) (2025-05-06)
-
 **Summary:** Refactored `worldGenerator.ts` to a class-based approach, eliminating global state to ensure concurrency safety. This involved creating a `WorldGenerator` class, moving state variables into it, and updating `GameStateService` to manage instances of this class. New unit tests were added for `WorldGenerator` and `GameStateService`. Dev container configurations and various minor code adjustments were also made. All backend tests passed and the build was successful.
+
+## Session 29: [Hybrid Chunk-Based Flood Fill Planning](./prompts/SESSION_29_Hybrid_Chunk_Based_Flood_Fill_Planning.md) (2025-05-07)
+Discussed and refined the plan for implementing a hybrid chunk-based flood fill system. Outlined data structures, APIs, and a phased approach for the next implementation session.
