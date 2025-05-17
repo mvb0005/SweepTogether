@@ -91,3 +91,6 @@ Created a Code Reviewer persona and used it to conduct a review of the backend c
 
 ## Session 29: [Hybrid Chunk-Based Flood Fill Planning](./prompts/SESSION_29_Hybrid_Chunk_Based_Flood_Fill_Planning.md) (2025-05-07)
 Discussed and refined the plan for implementing a hybrid chunk-based flood fill system. Outlined data structures, APIs, and a phased approach for the next implementation session.
+
+## Session 30: [Frontend Refactor for Chunk-Based Board Subscription](./prompts/SESSION_30_Frontend_Chunk_Subscription.md) (2025-05-08)
+Refactored the frontend to support chunk-based board subscription and rendering. Updated state management, socket logic, and board components to efficiently handle large/infinite boards by subscribing to and rendering only the visible chunks. Improved UI responsiveness and laid the groundwork for further polish and scalability.

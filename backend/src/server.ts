@@ -41,10 +41,12 @@ async function initializeApp() {
     console.log('Connected to database');
 
     // Initialize service registry (single source of services)
-    initAppServices();
+    initAppServices(io);
     console.log('Service registry initialized');
 
     // Setup Socket.IO game server
+    console.log('Setting up Socket.IO game server');
+    console.log('io=', io);
     setupSocketServer(io);
     console.log('Socket.IO game server initialized');
 

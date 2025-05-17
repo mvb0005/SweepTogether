@@ -1,12 +1,11 @@
 import { Chunk } from '../../domain/Chunk';
 import { Cell } from '../../domain/types';
-import { ChunkState, CHUNK_SIZE, IBoardManager, Coordinate } from '../../types/chunkTypes';
+import { ChunkState, CHUNK_SIZE, IChunkManager, Coordinate } from '../../types/chunkTypes';
 
-// Mock IBoardManager for testing propagation
-const mockBoardManager: IBoardManager = {
+// Mock IChunkManager for testing propagation
+const mockChunkManager: IChunkManager = {
   getChunk: jest.fn(),
   getChunkById: jest.fn(),
-  propagateFillToNeighbor: jest.fn(),
   convertGlobalToChunkCoordinates: jest.fn((globalX, globalY) => ({
     x: Math.floor(globalX / CHUNK_SIZE),
     y: Math.floor(globalY / CHUNK_SIZE),
@@ -29,7 +28,10 @@ const mockBoardManager: IBoardManager = {
     y: chunkY * CHUNK_SIZE + localY,
   })),
   getChunkId: jest.fn((chunkX, chunkY) => `${chunkX}_${chunkY}`),
+  revealAndPropagate: jest.fn(),
 };
+// Add propagateFillToNeighbor as a mock function for tests that need it
+(mockChunkManager as any).propagateFillToNeighbor = jest.fn();
 
 describe('Chunk', () => {
   beforeEach(() => {
@@ -201,9 +203,9 @@ describe('Chunk', () => {
       centerCell.adjacentMines = 1;
       chunk.setTile(1,1, centerCell);
 
-      const revealed = await chunk.executeLocalFloodFill(1, 1, 1, mockBoardManager);
-      expect(revealed.length).toBe(1);
-      expect(revealed[0]).toEqual(expect.objectContaining({ x: 1, y: 1, revealed: true }));
+      const result = await chunk.executeLocalFloodFill(1, 1, 1, mockChunkManager);
+      expect(result.revealedCells.length).toBe(1);
+      expect(result.revealedCells[0]).toEqual(expect.objectContaining({ x: 1, y: 1, revealed: true }));
       expect(chunk.getTile(1, 1)?.revealed).toBe(true);
     });
 
@@ -220,15 +222,15 @@ describe('Chunk', () => {
       chunk = createChunkForFloodFill({ isMine: [false, false, false, false, false, false, false, false] });
       expect(chunk.getTile(1,1)!.adjacentMines).toBe(0);
 
-      const revealed = await chunk.executeLocalFloodFill(1, 1, 0, mockBoardManager);
+      const result = await chunk.executeLocalFloodFill(1, 1, 0, mockChunkManager);
       // In a 3x3 chunk, a 0-mine cell at the center with no other mines reveals all 9 cells.
-      expect(revealed.length).toBe(9); 
-      revealed.forEach(cell => expect(cell.revealed).toBe(true));
+      expect(result.revealedCells.length).toBe(9); 
+      result.revealedCells.forEach(cell => expect(cell.revealed).toBe(true));
       // For a 3x3 grid of all 0-mine cells, every cell on the border will attempt to propagate outwards.
       // Corner cells (4 of them) propagate to 5 neighbors each: 4 * 5 = 20
       // Edge-center cells (4 of them) propagate to 3 neighbors each: 4 * 3 = 12
       // Total expected propagations: 20 + 12 = 32
-      expect(mockBoardManager.propagateFillToNeighbor).toHaveBeenCalledTimes(32);
+      expect((mockChunkManager as any).propagateFillToNeighbor).toHaveBeenCalledTimes(32);
     });
 
     it('should not reveal mines or flagged cells', async () => {
@@ -236,11 +238,11 @@ describe('Chunk', () => {
       chunk.setTile(0, 0, { ...chunk.getTile(0,0)!, isMine: true });
       chunk.setTile(1, 0, { ...chunk.getTile(1,0)!, flagged: true });
 
-      const revealed = await chunk.executeLocalFloodFill(1, 1, 0, mockBoardManager);
+      const result = await chunk.executeLocalFloodFill(1, 1, 0, mockChunkManager);
       // Center (1,1) is 0-adj, (0,1), (2,1), (0,2), (1,2), (2,2), (2,0) should be revealed (6 cells)
       // (0,0) is mine, (1,0) is flagged, (1,1) is the start point
       // Total revealed should be 7 (start + 6 neighbors)
-      expect(revealed.length).toBe(7); 
+      expect(result.revealedCells.length).toBe(7); 
       expect(chunk.getTile(0, 0)?.revealed).toBe(false);
       expect(chunk.getTile(1, 0)?.revealed).toBe(false);
     });
@@ -258,7 +260,7 @@ describe('Chunk', () => {
       chunk.setTile(0,1, {...chunk.getTile(0,1)!, adjacentMines: 1});
       chunk.setTile(1,1, {...chunk.getTile(1,1)!, adjacentMines: 1});
 
-      await chunk.executeLocalFloodFill(0, 0, 0, mockBoardManager);
+      await chunk.executeLocalFloodFill(0, 0, 0, mockChunkManager as any);
 
       // Propagation should occur only from the (0,0) cell because its internal neighbors are not 0-mine.
       // For cell (0,0) in chunk (0,0), external neighbors are:
@@ -266,21 +268,47 @@ describe('Chunk', () => {
       // (-1,0) (1 left)
       // (-1,1) (1 bottom-left relative to this propagation path)
       // Total = 5 propagations.
-      expect(mockBoardManager.propagateFillToNeighbor).toHaveBeenCalledTimes(5);
+      expect((mockChunkManager as any).propagateFillToNeighbor).toHaveBeenCalledTimes(5);
       // Example check for one propagation call (top neighbor of (0,0) which is (0,-1) globally)
-      expect(mockBoardManager.propagateFillToNeighbor).toHaveBeenCalledWith(
+      expect((mockChunkManager as any).propagateFillToNeighbor).toHaveBeenCalledWith(
         chunk.id, // fromChunkId
         0, -1,   // neighborChunkX, neighborChunkY
         0, CHUNK_SIZE - 1, // entryLocalX, entryLocalY (0, 15 for a CHUNK_SIZE 16)
         0         // originalMineCountHint
       );
       // Example check for left neighbor of (0,0) which is (-1,0) globally
-      expect(mockBoardManager.propagateFillToNeighbor).toHaveBeenCalledWith(
+      expect((mockChunkManager as any).propagateFillToNeighbor).toHaveBeenCalledWith(
         chunk.id, 
         -1, 0, 
         CHUNK_SIZE -1, 0, 
         0
       );
+    });
+
+    it('should propagate to all 3 catty corner (diagonal) neighbors at a chunk corner', async () => {
+      // Use a 3x3 chunk for easier boundary testing
+      chunk = new Chunk(0, 0, 3);
+      // Place a 0-mine cell at (0,0)
+      chunk.setTile(0, 0, { x: 0, y: 0, isMine: false, adjacentMines: 0, revealed: false, flagged: false });
+      // Make its internal neighbors non-0-mine to stop the flood fill after them
+      chunk.setTile(1, 0, { ...chunk.getTile(1, 0)!, adjacentMines: 1 });
+      chunk.setTile(0, 1, { ...chunk.getTile(0, 1)!, adjacentMines: 1 });
+      chunk.setTile(1, 1, { ...chunk.getTile(1, 1)!, adjacentMines: 1 });
+
+      await chunk.executeLocalFloodFill(0, 0, 0, mockChunkManager as any);
+
+      // Should propagate to (-1,-1), (0,-1), and (-1,0)
+      expect((mockChunkManager as any).propagateFillToNeighbor).toHaveBeenCalledWith(
+        chunk.id, -1, -1, 2, 2, 0 // Diagonal (catty corner)
+      );
+      expect((mockChunkManager as any).propagateFillToNeighbor).toHaveBeenCalledWith(
+        chunk.id, 0, -1, 0, 2, 0 // Top
+      );
+      expect((mockChunkManager as any).propagateFillToNeighbor).toHaveBeenCalledWith(
+        chunk.id, -1, 0, 2, 0, 0 // Left
+      );
+      // Should be called exactly 3 times for these 3 neighbors
+      expect((mockChunkManager as any).propagateFillToNeighbor).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -304,17 +332,17 @@ describe('Chunk', () => {
       chunk.setTile(0,0, {...chunk.getTile(0,0)!, adjacentMines: 1});
       chunk.addPendingFill(0,0,1);
 
-      const revealedCells = await chunk.processPendingFills(mockBoardManager);
+      const result = await chunk.processPendingFills(mockChunkManager);
       // Fill from (1,1) reveals all 9 cells in 3x3. Fill from (0,0) reveals 1 cell (itself).
       // Since (0,0) is already revealed by the first fill, it won't be re-added.
-      expect(revealedCells.length).toBe(9);
+      expect(result.revealedCells.length).toBe(9);
       expect(chunk.state).toBe(ChunkState.UP_TO_DATE);
       expect(chunk.pendingFills.length).toBe(0);
     });
 
     it('should set state to PROCESSING during operation and UP_TO_DATE after', async () => {
       chunk.addPendingFill(1, 1, 0);
-      const promise = chunk.processPendingFills(mockBoardManager);
+      const promise = chunk.processPendingFills(mockChunkManager);
       expect(chunk.state).toBe(ChunkState.PROCESSING);
       await promise;
       expect(chunk.state).toBe(ChunkState.UP_TO_DATE);
@@ -322,8 +350,8 @@ describe('Chunk', () => {
 
     it('should return empty array if no pending fills', async () => {
       expect(chunk.pendingFills.length).toBe(0);
-      const revealedCells = await chunk.processPendingFills(mockBoardManager);
-      expect(revealedCells.length).toBe(0);
+      const result = await chunk.processPendingFills(mockChunkManager);
+      expect(result.revealedCells.length).toBe(0);
       expect(chunk.state).toBe(ChunkState.LOADED_CLEAN); // Or UP_TO_DATE if it was dirty before
     });
 
@@ -336,10 +364,10 @@ describe('Chunk', () => {
       chunk.addPendingFill(0,0, 1);
       chunk.addPendingFill(2,2, 1);
 
-      const revealedCells = await chunk.processPendingFills(mockBoardManager);
-      expect(revealedCells.length).toBe(2);
-      expect(revealedCells.find(c => c.x === 0 && c.y === 0 && c.revealed)).toBeTruthy();
-      expect(revealedCells.find(c => c.x === 2 && c.y === 2 && c.revealed)).toBeTruthy();
+      const result = await chunk.processPendingFills(mockChunkManager);
+      expect(result.revealedCells.length).toBe(2);
+      expect(result.revealedCells.find((c: any) => c.x === 0 && c.y === 0 && c.revealed)).toBeTruthy();
+      expect(result.revealedCells.find((c: any) => c.x === 2 && c.y === 2 && c.revealed)).toBeTruthy();
       expect(chunk.state).toBe(ChunkState.UP_TO_DATE);
     });
 
@@ -357,7 +385,7 @@ describe('Chunk', () => {
         return result;
       });
       
-      await chunk.processPendingFills(mockBoardManager);
+      await chunk.processPendingFills(mockChunkManager);
       // The first fill (1,1) completes. The second fill (0,0) was added while processing.
       // So, pendingFills should contain (0,0) and state should be DIRTY.
       expect(chunk.pendingFills.length).toBe(1);

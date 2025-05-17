@@ -1,6 +1,8 @@
 // Basic types for the frontend game state
 
 export interface CellState {
+  x: number;
+  y: number;
   revealed: boolean;
   flagged: boolean;
   isMine?: boolean; // Note: Server might not send this until game over
@@ -14,10 +16,11 @@ export interface Coordinates {
 }
 
 export interface ViewportState {
-  center: Coordinates;
-  width: number;  // Viewport width in cells
-  height: number; // Viewport height in cells
-  zoom: number;   // For future zooming capability
+  center: { x: number; y: number };
+  width: number;
+  height: number;
+  scale: number;
+  panStart?: { x: number; y: number };
 }
 
 export type BoardState = CellState[][];
@@ -88,4 +91,41 @@ export interface UpdateLeaderboardPayload {
 export interface GameJoinedPayload {
     playerId: string;
     gameState: GameState;
+}
+
+// --- Chunk-based Board Types ---
+export interface ChunkCoords {
+  x: number;
+  y: number;
+}
+
+export interface Chunk {
+  coords: ChunkCoords;
+  cells: CellState[][]; // 2D array of cells within the chunk
+  isLoading?: boolean; // For frontend loading state
+}
+
+export type ChunkMap = Record<string, Chunk>;
+
+// Utility to convert coords to a string key
+export const chunkCoordsToKey = (coords: ChunkCoords): string => {
+  return `${coords.x}_${coords.y}`;
+};
+
+export const keyToChunkCoords = (key: string): ChunkCoords => {
+  const [x, y] = key.split('_').map(Number);
+  return { x, y };
+};
+
+// --- Chunk Subscription Socket Payloads ---
+export interface SubscribeChunksPayload {
+  chunks: ChunkCoords[];
+}
+
+export interface UnsubscribeChunksPayload {
+  chunks: ChunkCoords[];
+}
+
+export interface ChunkUpdatePayload {
+  chunk: Chunk;
 }

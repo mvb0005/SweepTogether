@@ -2,6 +2,9 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { getInitializedServices } from '../../application/services';
 import { BoardStateUpdatePayload, GameConfig, LeaderboardCategory, LeaderboardMetric, PlayerStatus } from '../../domain/types';
+import { CHUNK_SIZE } from '../../types/chunkTypes';
+import { IChunk } from '../../types/chunkTypes';
+import { Cell } from '../../domain/types';
 
 // Active game sessions and player connections
 interface ActiveSessions {
@@ -30,8 +33,9 @@ export function setupSocketServer(io: SocketIOServer): void {
   const socketPlayers: SocketPlayers = {};
   
   // Get services
-  const serviceRegistry = getInitializedServices();
+  const serviceRegistry = getInitializedServices(io);
   const { gameStateService, eventBus, leaderboardService } = serviceRegistry;
+
 
   io.on('connection', (socket: Socket) => {
     console.log(`New connection: ${socket.id}`);
@@ -39,12 +43,19 @@ export function setupSocketServer(io: SocketIOServer): void {
     /**
      * Handle game creation
      */
-    socket.on('createGame', async (data: { gameConfig: GameConfig, username?: string }) => {
+    socket.on('createGame', async (data: { gameConfig: GameConfig, username?: string, gameId?: string }) => {
       console.log(`Creating game with data: ${JSON.stringify(data)}`);
       try {
-        const { gameConfig, username = 'Anonymous' } = data;
-        const gameId = "game_" + Date.now(); // Generate a unique game ID
+        const { gameConfig, username = 'Anonymous', gameId: requestedGameId } = data;
+        // Use requested game ID if provided, otherwise generate one
+        const gameId = requestedGameId || "game_" + Date.now();
         const playerId = username;
+        
+        // Check if game already exists
+        if (gameStateService.gameExists(gameId)) {
+          throw new Error(`Game with ID ${gameId} already exists`);
+        }
+
         gameStateService.createGame(gameId, gameConfig);
         gameStateService.addPlayer(gameId, playerId, username);
         activeSessions[gameId] = { [playerId]: socket.id };
@@ -73,7 +84,17 @@ export function setupSocketServer(io: SocketIOServer): void {
       try {
         const { gameId, username = 'Anonymous' } = data;
         const gameExists = gameStateService.gameExists(gameId);
-        if (!gameExists) throw new Error(`Game not found: ${gameId}`);
+        if (!gameExists) {
+          // If game doesn't exist, create it with default config
+          const defaultConfig: GameConfig = {
+            isInfiniteWorld: true,
+            rows: 16,
+            cols: 16,
+            mines: 40
+          };
+          gameStateService.createGame(gameId, defaultConfig);
+        }
+        
         const playerId = username;
         gameStateService.addPlayer(gameId, playerId, username);
         if (!activeSessions[gameId]) activeSessions[gameId] = {};
@@ -137,10 +158,46 @@ export function setupSocketServer(io: SocketIOServer): void {
      */
     socket.on('revealTile', async (data: { gameId: string, playerId: string, x: number, y: number }) => {
       try {
+        console.log(`[revealTile] socket.rooms=${Array.from(socket.rooms).join(', ').toString()}`);
+
         const { gameId, playerId, x, y } = data;
         validatePlayer(socket.id, gameId, playerId);
+        // Get the board manager for this game
+        const chunkManager = gameStateService.getChunkManager(gameId);
+        
+        // Calculate which chunk this cell belongs to
+        const chunkX = Math.floor(x / CHUNK_SIZE);
+        const chunkY = Math.floor(y / CHUNK_SIZE);
+        const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
+
         // Emit event for PlayerActionService
         eventBus.publish('revealTile', { gameId, socketId: playerId, x, y });
+
+        // Get the updated chunk data
+        const chunk = chunkManager.getChunk(chunkX, chunkY);
+        if (chunk) {
+          // Filter cell data to only send mine info for revealed cells
+          const filteredTiles = chunk.tiles.map(row => 
+            row.map(cell => ({
+              x: cell.x,
+              y: cell.y,
+              revealed: cell.revealed,
+              flagged: cell.flagged,
+              ...(cell.revealed && {
+                isMine: cell.isMine,
+                adjacentMines: cell.adjacentMines
+              })
+            }))
+          );
+
+          // Broadcast the updated chunk data to all clients in the chunk room
+          io.to(chunkRoom).emit('chunkData', {
+            gameId,
+            chunkX,
+            chunkY,
+            tiles: filteredTiles
+          });
+        }
       } catch (error) {
         console.error('Error revealing tile:', error);
         socket.emit('error', {
@@ -157,8 +214,43 @@ export function setupSocketServer(io: SocketIOServer): void {
       try {
         const { gameId, playerId, x, y } = data;
         validatePlayer(socket.id, gameId, playerId);
-        // Emit event for PlayerActionService
+        
+        // Get the board manager for this game
+        const chunkManager = gameStateService.getChunkManager(gameId);
+        
+        // Calculate which chunk this cell belongs to
+        const chunkX = Math.floor(x / CHUNK_SIZE);
+        const chunkY = Math.floor(y / CHUNK_SIZE);
+        const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
 
+        // Emit event for PlayerActionService
+        eventBus.publish('flagTile', { gameId, socketId: playerId, x, y });
+
+        // Get the updated chunk data
+        const chunk = chunkManager.getChunk(chunkX, chunkY);
+        if (chunk) {
+          // Filter cell data to only send mine info for revealed cells
+          const filteredTiles = chunk.tiles.map(row => 
+            row.map(cell => ({
+              x: cell.x,
+              y: cell.y,
+              revealed: cell.revealed,
+              flagged: cell.flagged,
+              ...(cell.revealed && {
+                isMine: cell.isMine,
+                adjacentMines: cell.adjacentMines
+              })
+            }))
+          );
+
+          // Broadcast the updated chunk data to all clients in the chunk room
+          io.to(chunkRoom).emit('chunkData', {
+            gameId,
+            chunkX,
+            chunkY,
+            tiles: filteredTiles
+          });
+        }
       } catch (error) {
         console.error('Error flagging tile:', error);
         socket.emit('error', {
@@ -175,8 +267,43 @@ export function setupSocketServer(io: SocketIOServer): void {
       try {
         const { gameId, playerId, x, y } = data;
         validatePlayer(socket.id, gameId, playerId);
-        // Emit event for PlayerActionService
+        
+        // Get the board manager for this game
+        const chunkManager = gameStateService.getChunkManager(gameId);
+        
+        // Calculate which chunk this cell belongs to
+        const chunkX = Math.floor(x / CHUNK_SIZE);
+        const chunkY = Math.floor(y / CHUNK_SIZE);
+        const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
 
+        // Emit event for PlayerActionService
+        eventBus.publish('chordClick', { gameId, socketId: playerId, x, y });
+
+        // Get the updated chunk data
+        const chunk = chunkManager.getChunk(chunkX, chunkY);
+        if (chunk) {
+          // Filter cell data to only send mine info for revealed cells
+          const filteredTiles = chunk.tiles.map(row => 
+            row.map(cell => ({
+              x: cell.x,
+              y: cell.y,
+              revealed: cell.revealed,
+              flagged: cell.flagged,
+              ...(cell.revealed && {
+                isMine: cell.isMine,
+                adjacentMines: cell.adjacentMines
+              })
+            }))
+          );
+
+          // Broadcast the updated chunk data to all clients in the chunk room
+          io.to(chunkRoom).emit('chunkData', {
+            gameId,
+            chunkX,
+            chunkY,
+            tiles: filteredTiles
+          });
+        }
       } catch (error) {
         console.error('Error performing chord click:', error);
         socket.emit('error', {
@@ -207,6 +334,85 @@ export function setupSocketServer(io: SocketIOServer): void {
         console.error('Error fetching leaderboard:', error);
         socket.emit('error', {
           message: 'Failed to fetch leaderboard',
+          details: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    });
+
+    /**
+     * Handle chunk subscription
+     */
+    socket.on('subscribeToChunk', async (data: { gameId: string, chunkX: number, chunkY: number, playerId?: string }) => {
+      try {
+        const { gameId, chunkX, chunkY } = data;
+        console.log(`[subscribeToChunk] gameId=${gameId}, chunk=(${chunkX},${chunkY}), socket=${socket.id}`);
+        const gameExists = gameStateService.gameExists(gameId);
+        if (!gameExists) {
+          throw new Error(`Game not found: ${gameId}`);
+        }
+
+        // Get the board manager for this game
+        const chunkManager = gameStateService.getChunkManager(gameId);
+        
+        // Get the chunk data
+        const chunk = chunkManager.getChunk(chunkX, chunkY);
+        if (!chunk) {
+          throw new Error(`Chunk not found at (${chunkX}, ${chunkY})`);
+        }
+
+        // Join the chunk-specific room for updates
+        const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
+        socket.join(chunkRoom);
+
+        // Emit playerJoinedChunk to everyone in the chunk room
+        let playerId = data.playerId || socketPlayers[socket.id]?.playerId || socket.handshake.query.playerId || socket.id;
+        io.to(chunkRoom).emit('playerJoinedChunk', {
+          gameId,
+          chunkX,
+          chunkY,
+          playerId
+        });
+
+        console.log(`[subscribeToChunk] socket.rooms=${socket.rooms}`);
+        // Process all pending fills for all chunks until clean (back-and-forth propagation)
+        const visited = new Set<string>();
+        let dirtyFound;
+        do {
+          dirtyFound = false;
+          for (const [pendingChunkId, fills] of chunkManager.pendingFills.entries()) {
+            if (fills.length > 0) {
+              await chunkManager.processPendingFillsForChunk(pendingChunkId, visited);
+              dirtyFound = true;
+            }
+          }
+        } while (dirtyFound);
+
+        // After processing, broadcast the updated chunk to all subscribers
+        const filteredTiles = chunk.tiles.map(row =>
+          row.map(cell => ({
+            x: cell.x,
+            y: cell.y,
+            revealed: cell.revealed,
+            flagged: cell.flagged,
+            ...(cell.revealed && {
+              isMine: cell.isMine,
+              adjacentMines: cell.adjacentMines
+            })
+          }))
+        );
+
+        // Send the initial chunk data
+        socket.emit('chunkData', {
+          gameId,
+          chunkX,
+          chunkY,
+          tiles: filteredTiles
+        });
+
+      } catch (error) {
+        console.error('Error subscribing to chunk:', error);
+        socket.emit('error', {
+          message: 'Failed to subscribe to chunk',
           details: error instanceof Error ? error.message : 'Unknown error'
         });
       }

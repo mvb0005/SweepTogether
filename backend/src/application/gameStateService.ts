@@ -10,9 +10,11 @@ import { GameState, Cell, Coordinates, PointData, GameConfig, PlayerStatus } fro
 import { SpatialHashGrid } from '../domain/spatialHashGrid';
 // Import the WorldGenerator class instead of the old functions
 import { WorldGenerator } from '../domain/worldGenerator';
-import { BoardManager } from '../domain/BoardManager'; // Import BoardManager
-import { IBoardManager, CHUNK_SIZE } from '../types/chunkTypes'; // Import IBoardManager and CHUNK_SIZE
+import { ChunkManager } from '../domain/ChunkManager'; // Import ChunkManager
+import { IChunkManager, CHUNK_SIZE } from '../types/chunkTypes'; // Import IChunkManager and CHUNK_SIZE
 import { GetCellFunction } from '../domain/game';
+import { Server as SocketIOServer } from 'socket.io';
+import { IChunk } from '../types/chunkTypes';
 
 // Define a reasonable cell size for the spatial hash grid chunks
 const SPATIAL_GRID_CELL_SIZE = 16;
@@ -21,7 +23,13 @@ export class GameStateService {
     private games: Map<string, GameState> = new Map();
     // Use a Map to store WorldGenerator instances per gameId (seed)
     private worldGenerators: Map<string, WorldGenerator> = new Map();
-    private boardManagers: Map<string, IBoardManager> = new Map(); // Added for BoardManager instances
+    private chunkManagers: Map<string, IChunkManager> = new Map(); // Renamed for ChunkManager instances
+    private io: SocketIOServer;
+
+    constructor(io: SocketIOServer) {
+        console.log('[GameStateService] Constructor called');
+        this.io = io;
+    }
 
     /**
      * Get the game state for a given gameId.
@@ -67,7 +75,7 @@ export class GameStateService {
         this.games.delete(gameId);
         // Remove the corresponding world generator instance
         this.worldGenerators.delete(gameId);
-        this.boardManagers.delete(gameId); // Remove BoardManager instance
+        this.chunkManagers.delete(gameId); // Remove ChunkManager instance
         console.log(`Removed game ${gameId} and its world generator instance.`);
     }
 
@@ -95,31 +103,17 @@ export class GameStateService {
     }
 
     /**
-     * Gets the BoardManager instance for the given gameId.
-     * Creates a new instance if one doesn't exist for the game.
+     * Gets the ChunkManager instance for the given gameId.
+     * Throws if one doesn't exist for the game.
      * @param gameId The game ID.
-     * @returns The IBoardManager instance for the game.
+     * @returns The IChunkManager instance for the game.
      */
-    public getBoardManager(gameId: string): IBoardManager {
-        if (!this.boardManagers.has(gameId)) {
-            console.log(`Creating new BoardManager instance for game: ${gameId}`);
-            const worldGen = this.getWorldGenerator(gameId);
-            const cellGenerator = (globalX: number, globalY: number): Cell => {
-                const cellValue = worldGen.getCellValue(globalX, globalY);
-                const isMine = cellValue === 'M';
-                return {
-                    x: globalX,
-                    y: globalY,
-                    isMine: isMine,
-                    adjacentMines: isMine ? 0 : cellValue as number,
-                    revealed: false,
-                    flagged: false,
-                };
-            };
-            const newBoardManager = new BoardManager(CHUNK_SIZE, cellGenerator);
-            this.boardManagers.set(gameId, newBoardManager);
+    public getChunkManager(gameId: string): IChunkManager {
+        const manager = this.chunkManagers.get(gameId);
+        if (!manager) {
+            throw new Error(`ChunkManager not found for game ${gameId}`);
         }
-        return this.boardManagers.get(gameId)!;
+        return manager;
     }
 
     /**
@@ -201,6 +195,7 @@ export class GameStateService {
 
     /**
      * Create a new game with the given config and ID.
+     * Sets up the ChunkManager with all socket/broadcasting logic.
      */
     createGame(gameId: string, config: GameConfig): void {
         if (this.games.has(gameId)) {
@@ -227,8 +222,98 @@ export class GameStateService {
             spatialGrid: new SpatialHashGrid<PointData>(SPATIAL_GRID_CELL_SIZE),
         };
         this.setGame(gameId, newGame);
-        // Ensure a BoardManager is created when a game is created
-        this.getBoardManager(gameId);
+
+        // --- ChunkManager setup with socket logic ---
+        const worldGen = this.getWorldGenerator(gameId);
+        const cellGenerator = (globalX: number, globalY: number): Cell => {
+            const cellValue = worldGen.getCellValue(globalX, globalY);
+            const isMine = cellValue === 'M';
+            return {
+                x: globalX,
+                y: globalY,
+                isMine: isMine,
+                adjacentMines: isMine ? 0 : cellValue as number,
+                revealed: false,
+                flagged: false,
+            };
+        };
+        const hasActiveSubscribers = (gameId: string, chunkX: number, chunkY: number) => {
+            if (!this.io) return false;
+            const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
+            const room = this.io.sockets.adapter.rooms.get(chunkRoom);
+            const size = room ? room.size : 0;
+            console.log(`[hasActiveSubscribers] gameId=${gameId}, chunk=(${chunkX},${chunkY}), chunkRoom=${chunkRoom}, size=${size}`);
+            return !!room && room.size > 0;
+        };
+        const processAndBroadcastAllLoadedChunksUntilClean = async (chunkManager: ChunkManager) => {
+            let dirtyFound: boolean;
+            do {
+                dirtyFound = false;
+                for (const [chunkId, chunk] of chunkManager.chunks.entries()) {
+                    const [chunkX, chunkY] = chunkId.split('_').map(Number);
+                    if ((chunkManager.pendingFills.get(chunkId)?.length ?? 0) > 0 && chunkManager.hasActiveSubscribers(chunkManager.gameId, chunkX, chunkY)) {
+                        await chunkManager.processAndBroadcastChunk(chunkManager.gameId, chunkX, chunkY);
+                        dirtyFound = true;
+                    }
+                }
+            } while (dirtyFound);
+        };
+        const processAndBroadcastChunk = async (gameId: string, chunkX: number, chunkY: number) => {
+            if (!this.io) return;
+            const chunkManager = this.getChunkManager(gameId) as ChunkManager;
+            const chunk = chunkManager.getChunk(chunkX, chunkY);
+            if (!chunk) return;
+            const chunkId = chunkManager.getChunkId(chunkX, chunkY);
+            while ((chunkManager.pendingFills.get(chunkId)?.length ?? 0) > 0) {
+                await chunkManager.processPendingFillsForChunk(chunkId, new Set<string>());
+                const filteredTiles = chunk.tiles.map(row =>
+                    row.map(cell => ({
+                        x: cell.x,
+                        y: cell.y,
+                        revealed: cell.revealed,
+                        flagged: cell.flagged,
+                        ...(cell.revealed && {
+                            isMine: cell.isMine,
+                            adjacentMines: cell.adjacentMines
+                        })
+                    }))
+                );
+                const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
+                this.io.to(chunkRoom).emit('chunkData', {
+                    gameId,
+                    chunkX,
+                    chunkY,
+                    tiles: filteredTiles
+                });
+            }
+            await processAndBroadcastAllLoadedChunksUntilClean(chunkManager);
+        };
+        const broadcastChunkUpdate = (chunk: IChunk) => {
+            if (!this.io) return;
+            // You may want to move this logic to a shared util if needed elsewhere
+            const [chunkX, chunkY] = chunk.id.split('_').map(Number);
+            const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
+            const filteredTiles = chunk.tiles.map((row: Cell[]) =>
+                row.map((cell: Cell) => ({
+                    x: cell.x,
+                    y: cell.y,
+                    revealed: cell.revealed,
+                    flagged: cell.flagged,
+                    ...(cell.revealed && {
+                        isMine: cell.isMine,
+                        adjacentMines: cell.adjacentMines
+                    })
+                }))
+            );
+            this.io.to(chunkRoom).emit('chunkData', {
+                gameId,
+                chunkX,
+                chunkY,
+                tiles: filteredTiles
+            });
+        };
+        const chunkManager = new ChunkManager(gameId, CHUNK_SIZE, cellGenerator, hasActiveSubscribers, processAndBroadcastChunk, broadcastChunkUpdate);
+        this.chunkManagers.set(gameId, chunkManager);
     }
 
     /**
@@ -264,5 +349,74 @@ export class GameStateService {
         if (!game.players[playerId]) throw new Error(`Player ${playerId} not found in game ${gameId}.`);
         game.players[playerId].status = status;
         this.setGame(gameId, game);
+    }
+
+    /**
+     * Runs a global flood fill (not chunk-based) over the loaded/active region.
+     * Stops at the border of loaded chunks, adding pending fills for those chunks.
+     * Returns the list of revealed cells and a set of pending chunk IDs.
+     */
+    async runGlobalFloodFill(gameId: string, startX: number, startY: number): Promise<{ revealedCells: Cell[], pendingFills: Set<string> }> {
+        const gameState = this.getGame(gameId);
+        if (!gameState) throw new Error(`Game not found: ${gameId}`);
+        const getCell = this.getCell;
+        const chunkManager = this.getChunkManager(gameId);
+        const revealedCells: Cell[] = [];
+        const queue: { x: number; y: number }[] = [{ x: startX, y: startY }];
+        const visited = new Set<string>();
+        const pendingFills = new Set<string>();
+        visited.add(`${startX},${startY}`);
+
+        while (queue.length > 0) {
+            const { x, y } = queue.shift()!;
+            const cell = await getCell(gameState, x, y);
+            if (!cell || cell.revealed || cell.flagged || cell.isMine) continue;
+            // Reveal the cell
+            const revealedCell: Cell = { ...cell, revealed: true, flagged: false };
+            revealedCells.push(revealedCell);
+            // Only continue flood fill if adjacentMines is 0
+            if (revealedCell.adjacentMines === 0) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const nx = x + dx;
+                        const ny = y + dy;
+                        const key = `${nx},${ny}`;
+                        if (!visited.has(key)) {
+                            visited.add(key);
+                            // Check if neighbor is in a loaded chunk
+                            const { chunkCoordinate } = chunkManager.convertGlobalToChunkLocalCoordinates(nx, ny);
+                            const chunkId = chunkManager.getChunkId(chunkCoordinate.x, chunkCoordinate.y);
+                            if (chunkManager.chunks.has(chunkId)) {
+                                queue.push({ x: nx, y: ny });
+                            } else {
+                                pendingFills.add(chunkId);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Apply the results to the grid
+        this.updateGridCells(gameId, revealedCells);
+        // Sync revealed cells to chunk tiles and collect updated chunk IDs
+        const updatedChunkIds = new Set<string>();
+        for (const cell of revealedCells) {
+            const { chunkCoordinate, localCoordinate } = chunkManager.convertGlobalToChunkLocalCoordinates(cell.x, cell.y);
+            const chunk = chunkManager.getChunk(chunkCoordinate.x, chunkCoordinate.y);
+            if (chunk) {
+                chunk.setTile(localCoordinate.x, localCoordinate.y, cell);
+                const chunkId = chunkManager.getChunkId(chunkCoordinate.x, chunkCoordinate.y);
+                updatedChunkIds.add(chunkId);
+            }
+        }
+        // Broadcast each updated chunk
+        for (const chunkId of updatedChunkIds) {
+            const chunk = chunkManager.getChunkById(chunkId);
+            if (chunk && typeof chunkManager['broadcastChunkUpdate'] === 'function') {
+                chunkManager['broadcastChunkUpdate'](chunk);
+            }
+        }
+        return { revealedCells, pendingFills };
     }
 }

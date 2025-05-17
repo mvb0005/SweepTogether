@@ -1,13 +1,13 @@
 import { GameStateService } from '../../application/gameStateService';
 import { GameConfig, PlayerStatus, Cell } from '../../domain/types';
 import { WorldGenerator } from '../../domain/worldGenerator';
-import { BoardManager } from '../../domain/BoardManager';
+import { BoardManager } from '../../domain/ChunkManager';
 import { IBoardManager, CHUNK_SIZE } from '../../types/chunkTypes';
 import { SpatialHashGrid } from '../../domain/spatialHashGrid';
 
 // Mock WorldGenerator and BoardManager
 jest.mock('../../domain/worldGenerator'); // Corrected path
-jest.mock('../../domain/BoardManager', () => {
+jest.mock('../../domain/ChunkManager', () => {
     const MockedBoardManager = jest.fn().mockImplementation((gameId, boardConfig, gameStateService, eventBus, worldGenerator) => {
         return {
             gameId: gameId,

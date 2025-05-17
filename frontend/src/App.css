@@ -1,0 +1,56 @@
+.game-controls {
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: center;
+}
+
+.view-chunk-button {
+  padding: 8px 16px;
+  background-color: #2196F3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.view-chunk-button:hover {
+  background-color: #1976D2;
+}
+
+.app {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #f0f0f0;
+}
+
+.game-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background-color: #e0e0e0;
+}
+
+.loading-message,
+.error-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 1rem;
+  background-color: rgba(255, 255, 255, 0.9);
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.error-message {
+  color: #dc3545;
+  border: 1px solid #dc3545;
+}
+
+.loading-message {
+  color: #0d6efd;
+} 

@@ -86,15 +86,15 @@ export class PlayerActionService {
         const { gameState, player } = validationResult; // gameState and player are still useful for validation and context
 
         try {
-            const boardManager = this.gameStateService.getBoardManager(gameId);
-            if (!boardManager) {
-                console.error(`BoardManager not found for game ${gameId}`);
-                this.gameUpdateService.sendError(socketId, 'Internal server error: Board manager not found.');
+            const chunkManager = this.gameStateService.getChunkManager(gameId);
+            if (!chunkManager) {
+                console.error(`ChunkManager not found for game ${gameId}`);
+                this.gameUpdateService.sendError(socketId, 'Internal server error: Chunk manager not found.');
                 return;
             }
 
-            const { chunkCoordinate, localCoordinate } = boardManager.convertGlobalToChunkLocalCoordinates(x, y);
-            const targetChunk = boardManager.getChunk(chunkCoordinate.x, chunkCoordinate.y);
+            const { chunkCoordinate, localCoordinate } = chunkManager.convertGlobalToChunkLocalCoordinates(x, y);
+            const targetChunk = chunkManager.getChunk(chunkCoordinate.x, chunkCoordinate.y);
 
             if (!targetChunk) {
                 console.error(`Target chunk not found at (${chunkCoordinate.x}, ${chunkCoordinate.y}) for global (${x},${y})`);
@@ -104,6 +104,7 @@ export class PlayerActionService {
 
             const cellToReveal = targetChunk.getTile(localCoordinate.x, localCoordinate.y);
 
+            console.log(`[DEBUG] Cell to reveal: ${JSON.stringify(cellToReveal)}`);
             if (!cellToReveal) {
                 console.error(`Cell not found at local (${localCoordinate.x}, ${localCoordinate.y}) in chunk ${targetChunk.id}`);
                 this.gameUpdateService.sendError(socketId, 'Internal server error: Cell data not found.');
@@ -148,23 +149,14 @@ export class PlayerActionService {
                 return;
             }
 
-            // If not a mine, proceed with flood fill
-            targetChunk.addPendingFill(localCoordinate.x, localCoordinate.y, cellToReveal.adjacentMines);
-            
-            // processPendingFills now returns the cells revealed in this specific chunk's processing cycle
-            const revealedCellsInChunk = await targetChunk.processPendingFills(boardManager);
+            // If not a mine, proceed with flood fill using the new global method
+            const { revealedCells, pendingFills } = await this.gameStateService.runGlobalFloodFill(gameId, x, y);
 
-            console.log(`Player ${socketId} initiated reveal at (${x},${y}). Chunk processing in ${targetChunk.id} revealed ${revealedCellsInChunk.length} cells locally.`);
+            console.log(`Player ${socketId} initiated reveal at (${x},${y}). Global flood fill revealed ${revealedCells.length} cells. Pending fills for chunks: ${Array.from(pendingFills).join(', ')}`);
 
-            // TODO: This only includes cells from the *initial* chunk processed directly by this action.
-            // Cells revealed in *neighboring* chunks due to propagation are not yet collected here.
-            // A more robust system is needed to gather all affected cells across all chunks involved in a single user action.
-            if (revealedCellsInChunk.length > 0) {
-                // Update score via ScoreService for the cells revealed in this chunk
-                this.scoreService.handleCellReveal(gameId, socketId, revealedCellsInChunk);
-
-                // Send tile updates to clients for cells revealed in this chunk
-                const tilesUpdatePayload = revealedCellsInChunk.map(cell => ({
+            if (revealedCells.length > 0) {
+                this.scoreService.handleCellReveal(gameId, socketId, revealedCells);
+                const tilesUpdatePayload = revealedCells.map(cell => ({
                     x: cell.x,
                     y: cell.y,
                     revealed: cell.revealed,
@@ -173,9 +165,10 @@ export class PlayerActionService {
                 }));
                 this.gameUpdateService.sendTilesUpdate(gameId, tilesUpdatePayload);
             }
+            // Optionally: handle pendingFills here (e.g., trigger chunk loading)
 
         } catch (error) {
-            console.error('Error revealing cell with chunk system:', error);
+            console.error('Error revealing cell with global method:', error);
             this.gameUpdateService.sendError(socketId, 'Failed to reveal tile.');
         }
     }
