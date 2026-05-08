@@ -156,4 +156,24 @@ export class ChunkManager implements IChunkManager {
     this.pendingFills.delete(chunkId);
     console.log(`[ChunkManager] Deleted pending fills for chunkId=${chunkId}`);
   }
+
+  /**
+   * Drain pending fills for all already-subscribed chunks.
+   * Called after processing a newly subscribed chunk to propagate any fills that
+   * spilled back into chunks that are already loaded and have active subscribers.
+   */
+  public async drainSubscribedPendingFills(): Promise<void> {
+    let dirtyFound: boolean;
+    do {
+      dirtyFound = false;
+      for (const [chunkId] of this.pendingFills.entries()) {
+        if ((this.pendingFills.get(chunkId)?.length ?? 0) === 0) continue;
+        const [cx, cy] = chunkId.split('_').map(Number);
+        if (this.hasActiveSubscribers(this.gameId, cx, cy)) {
+          await this.processAndBroadcastChunk(this.gameId, cx, cy);
+          dirtyFound = true;
+        }
+      }
+    } while (dirtyFound);
+  }
 }

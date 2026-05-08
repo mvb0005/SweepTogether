@@ -3,6 +3,7 @@ import {
   ErrorPayload,
   GameConfig
 } from '../../domain/types';
+import { CHUNK_SIZE } from '../../types/chunkTypes';
 import { EventBus } from '../eventBus/EventBus';
 import { SocketEventMap } from './socketEvents';
 import { GameStateService } from '../../application/gameStateService';
@@ -92,11 +93,17 @@ export function registerSocketHandlers(
       const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
       socket.join(chunkRoom);
 
-      // Process pending fills only for this chunk — fills propagating into
-      // further unloaded chunks stay pending until those chunks are subscribed.
+      // Process pending fills using the global BFS so back-propagation into
+      // already-loaded neighbouring chunks works correctly.
       const chunkId = `${chunkX}_${chunkY}`;
-      if ((chunkManager.pendingFills.get(chunkId)?.length ?? 0) > 0) {
-        await chunkManager.processPendingFillsForChunk(chunkId, new Set<string>());
+      const fills = chunkManager.pendingFills.get(chunkId) ?? [];
+      if (fills.length > 0) {
+        chunkManager.pendingFills.delete(chunkId);
+        for (const fill of fills) {
+          const globalX = chunkX * CHUNK_SIZE + fill.localX;
+          const globalY = chunkY * CHUNK_SIZE + fill.localY;
+          await gameStateService.runGlobalFloodFill(gameId, globalX, globalY);
+        }
       }
 
       // Send the initial chunk data to the subscribing socket

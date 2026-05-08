@@ -260,7 +260,7 @@ export class GameStateService {
         };
         const processAndBroadcastChunk = async (gameId: string, chunkX: number, chunkY: number) => {
             if (!this.io) return;
-            const chunkManager = this.getChunkManager(gameId) as ChunkManager;
+            const chunkManager = this.getChunkManager(gameId) as unknown as ChunkManager;
             const chunk = chunkManager.getChunk(chunkX, chunkY);
             if (!chunk) return;
             const chunkId = chunkManager.getChunkId(chunkX, chunkY);

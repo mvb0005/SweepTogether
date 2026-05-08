@@ -45,6 +45,7 @@ export interface IChunkManager {
   getChunkId(chunkX: number, chunkY: number): string;
   revealAndPropagate(x: number, y: number, originalMineCountHint?: number): Promise<Cell[]>;
   processPendingFillsForChunk(chunkId: string, visited: Set<string>): Promise<void>;
+  drainSubscribedPendingFills(): Promise<void>;
   readonly pendingFills: Map<string, PendingFillItem[]>;
   readonly chunks: Map<string, IChunk>;
   broadcastChunkUpdate?: (chunk: IChunk) => void;

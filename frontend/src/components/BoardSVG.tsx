@@ -34,6 +34,22 @@ const BoardSVG: React.FC<BoardSVGProps> = ({ chunks, chunkSize }) => {
 
   const viewBox = `${worldLeft * CELL_SIZE} ${worldTop * CELL_SIZE} ${viewport.width * CELL_SIZE} ${viewport.height * CELL_SIZE}`;
 
+  const firstBorderX = Math.ceil(worldLeft / chunkSize) * chunkSize;
+  const firstBorderY = Math.ceil(worldTop / chunkSize) * chunkSize;
+  const chunkBorderLines: React.ReactElement[] = [];
+  for (let cx = firstBorderX; cx <= worldRight; cx += chunkSize) {
+    chunkBorderLines.push(
+      <line key={`vb-${cx}`} x1={cx * CELL_SIZE} y1={worldTop * CELL_SIZE} x2={cx * CELL_SIZE} y2={worldBottom * CELL_SIZE}
+        stroke="rgba(255,0,0,0.5)" strokeWidth={2} strokeDasharray="6 4" style={{ pointerEvents: 'none' }} />
+    );
+  }
+  for (let cy = firstBorderY; cy <= worldBottom; cy += chunkSize) {
+    chunkBorderLines.push(
+      <line key={`hb-${cy}`} x1={worldLeft * CELL_SIZE} y1={cy * CELL_SIZE} x2={worldRight * CELL_SIZE} y2={cy * CELL_SIZE}
+        stroke="rgba(255,0,0,0.5)" strokeWidth={2} strokeDasharray="6 4" style={{ pointerEvents: 'none' }} />
+    );
+  }
+
   return (
     <svg
       width="100%"
@@ -129,6 +145,7 @@ const BoardSVG: React.FC<BoardSVGProps> = ({ chunks, chunkSize }) => {
           })
         );
       })}
+      {chunkBorderLines}
     </svg>
   );
 };

@@ -29,6 +29,10 @@ const mockChunkManager: IChunkManager = {
   })),
   getChunkId: jest.fn((chunkX, chunkY) => `${chunkX}_${chunkY}`),
   revealAndPropagate: jest.fn(),
+  processPendingFillsForChunk: jest.fn(),
+  drainSubscribedPendingFills: jest.fn(),
+  pendingFills: new Map(),
+  chunks: new Map(),
 };
 // Add propagateFillToNeighbor as a mock function for tests that need it
 (mockChunkManager as any).propagateFillToNeighbor = jest.fn();

@@ -90,8 +90,18 @@ await chunkManager.drainSubscribedPendingFills();
 
 ## Session Notes
 
-<!-- Fill in after session completes -->
+Three files changed, one test mock fixed:
+
+1. **`backend/src/types/chunkTypes.ts`** — Added `drainSubscribedPendingFills(): Promise<void>` to `IChunkManager` interface.
+
+2. **`backend/src/domain/ChunkManager.ts`** — Implemented `drainSubscribedPendingFills()`: a do/while loop over `pendingFills` that calls `processAndBroadcastChunk` for each entry whose chunk currently has active subscribers, repeating until no dirty subscribed chunks remain. This handles cascades where processing one chunk generates new pending fills in an already-loaded neighbour.
+
+3. **`backend/src/infrastructure/network/socketHandlers.ts`** — Added `await chunkManager.drainSubscribedPendingFills()` immediately after the existing `processPendingFillsForChunk` call in `subscribeToChunk`, so any fills that spilled back into already-loaded chunks are processed and broadcast before the handler returns.
+
+4. **`backend/src/tests/domain/Chunk.test.ts`** — Extended the `mockChunkManager` literal to include `processPendingFillsForChunk`, `drainSubscribedPendingFills`, `pendingFills`, and `chunks`, resolving a TypeScript interface-mismatch error that the new method surfaced (the mock was already incomplete; adding the new method to `IChunkManager` made tsc report it).
+
+No new type errors were introduced. Pre-existing stale-test errors (`addPendingFill`, `getBoardManager`, etc.) remain but are unrelated to this session.
 
 ## Deferred / Incomplete
 
-<!-- List anything explicitly left unfinished. If nothing, write "None." -->
+None.
