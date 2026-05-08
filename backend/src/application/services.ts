@@ -27,7 +27,7 @@ export function initAppServices(io: SocketIOServer): AppServices {
   if (initializedServices) return initializedServices;
   const eventBus = new InMemoryEventBus<SocketEventMap>();
   const gameStateService = new GameStateService(io);
-  const gameUpdateService = new GameUpdateService();
+  const gameUpdateService = new GameUpdateService(io, gameStateService);
   const scoreService = new ScoreService(eventBus, gameStateService, gameUpdateService);
   const playerActionService = new PlayerActionService(eventBus, gameStateService, gameUpdateService, scoreService);
   const leaderboardService = new LeaderboardService(eventBus, gameStateService, gameUpdateService, scoreService);

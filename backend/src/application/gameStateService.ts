@@ -391,6 +391,9 @@ export class GameStateService {
                                 queue.push({ x: nx, y: ny });
                             } else {
                                 pendingFills.add(chunkId);
+                                const { localCoordinate } = chunkManager.convertGlobalToChunkLocalCoordinates(nx, ny);
+                                if (!chunkManager.pendingFills.has(chunkId)) chunkManager.pendingFills.set(chunkId, []);
+                                chunkManager.pendingFills.get(chunkId)!.push({ localX: localCoordinate.x, localY: localCoordinate.y });
                             }
                         }
                     }

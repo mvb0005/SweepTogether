@@ -1,15 +1,15 @@
 import { Server, Socket } from 'socket.io';
-import { 
-  Coordinates,
+import {
   ErrorPayload,
-  ViewportUpdatePayload // Keep necessary types used by handlers/emitError
+  GameConfig
 } from '../../domain/types';
 import { EventBus } from '../eventBus/EventBus';
-import { SocketEventName, SocketEventMap } from './socketEvents';
+import { SocketEventMap } from './socketEvents';
+import { GameStateService } from '../../application/gameStateService';
 
 /**
  * Helper function to emit error messages to a client
- * 
+ *
  * @param socket - The socket to emit the error to
  * @param message - The error message
  */
@@ -20,23 +20,118 @@ export function emitError(socket: Socket, message: string): void {
 }
 
 /**
- * Register WebSocket event handlers for a socket, delegating logic to EventBus.
- * 
+ * Register WebSocket event handlers for a socket, delegating logic to EventBus
+ * and handling joinGame / subscribeToChunk directly.
+ *
  * @param io - The Socket.IO server instance
  * @param socket - The socket to set up handlers for
  * @param eventBus - The event bus instance
+ * @param gameStateService - The game state service instance
  */
 export function registerSocketHandlers(
   io: Server,
   socket: Socket,
-  eventBus: EventBus<SocketEventMap>
+  eventBus: EventBus<SocketEventMap>,
+  gameStateService: GameStateService
 ) {
   console.log(`New client connected: ${socket.id}`);
+
+  // --- joinGame ---
+  socket.on('joinGame', async (data: { gameId: string; username?: string }) => {
+    try {
+      const { gameId, username = 'Anonymous' } = data;
+      if (!gameStateService.gameExists(gameId)) {
+        const defaultConfig: GameConfig = {
+          isInfiniteWorld: true,
+          rows: 16,
+          cols: 16,
+          mines: 40,
+        };
+        gameStateService.createGame(gameId, defaultConfig);
+      }
+      const playerId = socket.id;
+      gameStateService.addPlayer(gameId, playerId, username);
+      socket.join(gameId);
+      socket.data.gameId = gameId;
+      const gameState = gameStateService.getGame(gameId);
+      console.log(`[joinGame] Player ${username} (${playerId}) joined game ${gameId}`);
+      socket.emit('gameJoined', {
+        gameId,
+        playerId,
+        players: gameState?.players ?? {},
+      });
+      socket.to(gameId).emit('playerJoined', {
+        gameId,
+        playerId,
+        username,
+        players: gameState?.players ?? {},
+      });
+    } catch (error) {
+      console.error('[joinGame] Error:', error);
+      socket.emit('error', {
+        message: 'Failed to join game',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  // --- subscribeToChunk ---
+  socket.on('subscribeToChunk', async (data: { gameId: string; chunkX: number; chunkY: number; playerId?: string }) => {
+    try {
+      const { gameId, chunkX, chunkY } = data;
+      console.log(`[subscribeToChunk] gameId=${gameId}, chunk=(${chunkX},${chunkY}), socket=${socket.id}`);
+      if (!gameStateService.gameExists(gameId)) {
+        throw new Error(`Game not found: ${gameId}`);
+      }
+      const chunkManager = gameStateService.getChunkManager(gameId);
+
+      // getChunk auto-creates the chunk if it doesn't yet exist
+      const chunk = chunkManager.getChunk(chunkX, chunkY);
+
+      // Join the chunk room
+      const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
+      socket.join(chunkRoom);
+
+      // Process pending fills only for this chunk — fills propagating into
+      // further unloaded chunks stay pending until those chunks are subscribed.
+      const chunkId = `${chunkX}_${chunkY}`;
+      if ((chunkManager.pendingFills.get(chunkId)?.length ?? 0) > 0) {
+        await chunkManager.processPendingFillsForChunk(chunkId, new Set<string>());
+      }
+
+      // Send the initial chunk data to the subscribing socket
+      const filteredTiles = chunk.tiles.map(row =>
+        row.map(cell => ({
+          x: cell.x,
+          y: cell.y,
+          revealed: cell.revealed,
+          flagged: cell.flagged,
+          ...(cell.revealed && {
+            isMine: cell.isMine,
+            adjacentMines: cell.adjacentMines,
+          }),
+        }))
+      );
+      socket.emit('chunkData', { gameId, chunkX, chunkY, tiles: filteredTiles });
+    } catch (error) {
+      console.error('[subscribeToChunk] Error:', error);
+      socket.emit('error', {
+        message: 'Failed to subscribe to chunk',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  // --- unsubscribeFromChunk ---
+  socket.on('unsubscribeFromChunk', (data: { gameId: string; chunkX: number; chunkY: number }) => {
+    const { gameId, chunkX, chunkY } = data;
+    const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
+    socket.leave(chunkRoom);
+  });
 
   // Dynamically register handlers for only the events with subscribers
   const eventNames = eventBus.getSubscribedEventNames();
   for (const eventName of eventNames) {
-    console.log(`Event received: ${eventName}`, eventName);
     socket.on(eventName as string, (data: any) => {
       let payload: any = { ...data, socketId: socket.id };
       if ('gameId' in socket.data && !payload.gameId) {

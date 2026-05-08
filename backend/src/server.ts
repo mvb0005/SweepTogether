@@ -5,7 +5,7 @@ import cors from 'cors';
 import bodyParser from 'body-parser';
 import { connectToDatabase, disconnectFromDatabase } from './infrastructure/persistence/db';
 import { initAppServices } from './application/services';
-import { setupSocketServer } from './infrastructure/network/socketServer';
+import { registerSocketHandlers } from './infrastructure/network/socketHandlers';
 
 // Initialize Express app
 const app = express();
@@ -41,14 +41,15 @@ async function initializeApp() {
     console.log('Connected to database');
 
     // Initialize service registry (single source of services)
-    initAppServices(io);
+    const services = initAppServices(io);
     console.log('Service registry initialized');
 
-    // Setup Socket.IO game server
-    console.log('Setting up Socket.IO game server');
-    console.log('io=', io);
-    setupSocketServer(io);
-    console.log('Socket.IO game server initialized');
+    // Register per-socket handlers
+    io.on('connection', (socket) => {
+      console.log(`Client connected: ${socket.id}`);
+      registerSocketHandlers(io, socket, services.eventBus, services.gameStateService);
+    });
+    console.log('Socket.IO handlers registered');
 
     // Setup API routes
 

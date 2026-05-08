@@ -18,6 +18,9 @@ export type SocketEventMap = {
   chordClick: ChordClickPayload & { gameId: string; socketId: string };
   updateViewport: ViewportUpdatePayload & { gameId: string; socketId: string };
   playerDisconnected: { socketId: string };
+  // Chunk subscription events
+  subscribeToChunk: { gameId: string; chunkX: number; chunkY: number; playerId?: string; socketId: string };
+  unsubscribeFromChunk: { gameId: string; chunkX: number; chunkY: number; socketId: string };
   // Leaderboard events
   getLeaderboard: LeaderboardRequestPayload & { socketId: string };
   leaderboardData: LeaderboardResponsePayload;

@@ -40,7 +40,7 @@ async function startServer() {
         // Set up Socket.IO event handlers using the new structure
         io.on('connection', (socket) => {
             console.log(`Client connected: ${socket.id}`);
-            registerSocketHandlers(io, socket, services.eventBus);
+            registerSocketHandlers(io, socket, services.eventBus, services.gameStateService);
         });
 
         // Start the HTTP server

@@ -150,7 +150,8 @@ export class ChunkManager implements IChunkManager {
     const chunk = this.getChunk(chunkX, chunkY);
     for (const fill of fills) {
       console.log(`[ChunkManager] Processing fill in chunkId=${chunkId}: localX=${fill.localX}, localY=${fill.localY}`);
-      await chunk.executeLocalFloodFill(fill.localX, fill.localY, fill.originalMineCountHint, this, visited);
+      const result = await chunk.executeLocalFloodFill(fill.localX, fill.localY, fill.originalMineCountHint, this, visited);
+      this.addPendingFillsToChunks(result.pendingFills);
     }
     this.pendingFills.delete(chunkId);
     console.log(`[ChunkManager] Deleted pending fills for chunkId=${chunkId}`);

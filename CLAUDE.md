@@ -45,7 +45,9 @@ nginx (:8080)
 
 ## Known Incomplete Work
 
-- **`subscribeToChunk` not handled by the running server.** `socketServer.ts` has the full handler but is never imported by `server.ts` (which uses the event-bus-based `socketHandlers.ts`). The frontend emits `subscribeToChunk` on pan but the backend silently ignores it — no chunk data is returned and the board never renders. Next session: wire `subscribeToChunk` into the event bus and service layer.
+- **`socketServer.ts` is dead code.** It was superseded by `socketHandlers.ts` in Session 32. Safe to delete in a future cleanup session.
+- **No persistence across server restarts.** Game state is in-memory only. MongoDB is structurally wired but not fully integrated into the game lifecycle.
+- **No player validation on tile actions.** `revealTile`/`flagTile`/`chordClick` go through the event bus without verifying the player exists or is authorised.
 
 ## Session Workflow
 
