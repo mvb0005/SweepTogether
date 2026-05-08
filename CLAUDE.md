@@ -45,9 +45,19 @@ nginx (:8080)
 
 ## Known Incomplete Work
 
-- **`socketServer.ts` is dead code.** It was superseded by `socketHandlers.ts` in Session 32. Safe to delete in a future cleanup session.
+- **`socketServer.ts` is dead code.** Superseded by `socketHandlers.ts` in Session 32. Safe to delete.
 - **No persistence across server restarts.** Game state is in-memory only. MongoDB is structurally wired but not fully integrated into the game lifecycle.
 - **No player validation on tile actions.** `revealTile`/`flagTile`/`chordClick` go through the event bus without verifying the player exists or is authorised.
+- **Flood fill chunk-border edge case.** Isolated revealed cells appear at chunk boundaries that don't connect correctly to the broader flood fill region. Likely cause: when a 0-cell at a chunk border generates pending fill entry points into an adjacent chunk, cells from that adjacent chunk that should flood BACK into already-loaded chunks never get processed (those chunks won't be re-subscribed). Needs investigation in `processPendingFillsForChunk` / `executeLocalFloodFill` boundary handling.
+
+## Scalability Concerns (noted 2026-05-08)
+
+- **Flood fill blocks the event loop.** `runGlobalFloodFill` is a synchronous BFS — a large open area can visit 700+ cells in one call, stalling Socket.IO for all connected clients. Needs chunked/yielded execution or offloading.
+- **Duplicate chunk subscriptions.** Logs show every chunk subscribed twice per connection. `ChunkLoader`'s `useEffect` likely double-fires on connect due to dependency on both `visibleChunks` and `socket`/`isConnected`.
+- **No debounce on pan.** Every cell-boundary crossing fires `subscribeToChunk`. Rapid panning floods the server with subscription requests.
+- **All state is in-memory / single server.** No horizontal scaling possible until MongoDB persistence is properly integrated.
+- **`pendingFills` grows unbounded.** Fills for chunks nobody ever visits accumulate and are never cleaned up.
+- **Single "default" game.** No multi-room support yet.
 
 ## Session Workflow
 
