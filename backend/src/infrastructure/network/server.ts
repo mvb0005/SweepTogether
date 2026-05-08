@@ -35,7 +35,7 @@ async function startServer() {
         await connectToDatabase();
 
         // Initialize all app services (waits for DB/collections)
-        const services = initAppServices();
+        const services = initAppServices(io);
 
         // Set up Socket.IO event handlers using the new structure
         io.on('connection', (socket) => {

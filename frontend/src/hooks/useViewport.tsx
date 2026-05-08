@@ -5,7 +5,7 @@ interface UseViewportProps {
   initialCenter?: Coordinates;
   initialWidth?: number;
   initialHeight?: number;
-  initialZoom?: number;
+  initialScale?: number;
   onViewportChange?: (viewport: ViewportState) => void;
 }
 
@@ -19,7 +19,7 @@ interface UseViewportReturn {
   handlePanEnd: () => void;
   handleKeyboardPan: (direction: 'up' | 'down' | 'left' | 'right') => void;
   setCenterPosition: (x: number, y: number) => void;
-  setZoom: (zoom: number) => void;
+  setScale: (scale: number) => void;
 }
 
 /**
@@ -29,7 +29,7 @@ export function useViewport({
   initialCenter = { x: 0, y: 0 },
   initialWidth = 20,
   initialHeight = 15,
-  initialZoom = 1,
+  initialScale = 1,
   onViewportChange
 }: UseViewportProps = {}): UseViewportReturn {
   // Main viewport state
@@ -37,7 +37,7 @@ export function useViewport({
     center: initialCenter,
     width: initialWidth,
     height: initialHeight,
-    zoom: initialZoom
+    scale: initialScale
   });
 
   // Panning state
@@ -63,7 +63,7 @@ export function useViewport({
            prev.center.y !== updated.center.y ||
            prev.width !== updated.width ||
            prev.height !== updated.height ||
-           prev.zoom !== updated.zoom)) {
+           prev.scale !== updated.scale)) {
         
         // We don't need to call the callback for every tiny movement during a pan
         // Only trigger the callback if we're not actively panning OR if center changed significantly
@@ -88,13 +88,13 @@ export function useViewport({
     }
   }, [updateViewport, viewport.center.x, viewport.center.y]);
 
-  // Change zoom level
-  const setZoom = useCallback((zoom: number) => {
-    zoom = Math.max(0.5, Math.min(zoom, 3)); // Limit zoom range
-    if (zoom !== viewport.zoom) {
-      updateViewport({ zoom });
+  // Change scale level
+  const setScale = useCallback((scale: number) => {
+    scale = Math.max(0.5, Math.min(scale, 3)); // Limit scale range
+    if (scale !== viewport.scale) {
+      updateViewport({ scale });
     }
-  }, [updateViewport, viewport.zoom]);
+  }, [updateViewport, viewport.scale]);
 
   // Convert world coordinates to viewport-relative coordinates
   const worldToViewportCoordinates = useCallback((worldX: number, worldY: number) => {
@@ -265,6 +265,6 @@ export function useViewport({
     handlePanEnd,
     handleKeyboardPan,
     setCenterPosition,
-    setZoom
+    setScale
   };
 }

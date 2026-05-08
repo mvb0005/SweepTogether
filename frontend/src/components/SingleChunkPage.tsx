@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSocket } from '../hooks/useSocket';
 import Board from './Board';
-import { ChunkMap, ChunkUpdatePayload, chunkCoordsToKey } from '../types';
+import { ChunkMap, chunkCoordsToKey } from '../types';
 import './SingleChunkPage.css';
 
 const SingleChunkPage: React.FC = () => {
@@ -88,7 +88,7 @@ const SingleChunkPage: React.FC = () => {
     center,
     width: CHUNK_SIZE,
     height: CHUNK_SIZE,
-    zoom: 1
+    scale: 1
   };
 
   // Subscribe to just this chunk
@@ -224,11 +224,7 @@ const SingleChunkPage: React.FC = () => {
     };
   }, [socket, isConnected, currentGameId, chunkX, chunkY]);
 
-  // Board interaction handlers (no-op or alert)
   const noop = () => {};
-  const handleInteraction = () => {
-    alert('Please use the main game view to interact with cells.');
-  };
 
   if (!currentGameId) {
     return (

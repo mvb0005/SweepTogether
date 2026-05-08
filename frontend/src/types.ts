@@ -20,7 +20,6 @@ export interface ViewportState {
   width: number;
   height: number;
   scale: number;
-  panStart?: { x: number; y: number };
 }
 
 export type BoardState = CellState[][];

@@ -94,3 +94,6 @@ Discussed and refined the plan for implementing a hybrid chunk-based flood fill 
 
 ## Session 30: [Frontend Refactor for Chunk-Based Board Subscription](./prompts/SESSION_30_Frontend_Chunk_Subscription.md) (2025-05-08)
 Refactored the frontend to support chunk-based board subscription and rendering. Updated state management, socket logic, and board components to efficiently handle large/infinite boards by subscribing to and rendering only the visible chunks. Improved UI responsiveness and laid the groundwork for further polish and scalability.
+
+## Session 31: [Viewport Panning & Context Refactor](./prompts/SESSION_31_Viewport_Panning_Context_Refactor.md) (2026-05-08)
+Wired viewport panning end-to-end and eliminated prop drilling by introducing `ViewportContext` and `GameContext`. Deleted the stub `Viewport.tsx` and `ChunkedBoard.tsx` wrapper, folded their responsibilities into the context providers and `ChunkLoader`. `BoardSVG` now reads pan handlers and game actions directly from context and drives panning via mouse events on the SVG element with a dragging ref to suppress cell clicks after a drag. Aligned `zoom` → `scale` naming across `useViewport`, `ViewportState`, and `SingleChunkPage`. TypeScript strict-mode checks pass cleanly.

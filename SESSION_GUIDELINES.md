@@ -54,7 +54,13 @@ At the end of each development session, follow these steps to ensure proper docu
   
   ## Session Notes
   [Document what was accomplished, key decisions, challenges, etc.]
+
+  ## Deferred / Incomplete
+  [List anything explicitly left unfinished, stubbed out, or punted to a future session.
+   Be specific: name the file, component, or behaviour and why it was deferred.
+   If nothing was deferred, write "None."]
   ```
+- **The "Deferred / Incomplete" section is mandatory.** It prevents future sessions from discovering half-finished work by accident (as happened with viewport panning after Session 30).
 
 ### 6. Commit Guidelines (if committing code)
 - Use format: `Session XX: Brief description of changes`

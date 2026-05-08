@@ -1,34 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { useSocket } from '../hooks/useSocket';
-import ChunkedBoard from './ChunkedBoard';
-import { ChunkMap, ChunkCoords, ViewportState } from '../types';
+import { useViewportContext } from '../contexts/ViewportContext';
+import { useGameContext } from '../contexts/GameContext';
+import BoardSVG from './BoardSVG';
+import { ChunkMap } from '../types';
 
-interface ChunkLoaderProps {
-  gameId: string;
-  visibleChunks: ChunkCoords[];
-  viewport: ViewportState;
-  onRevealCell: (x: number, y: number) => void;
-  onFlagCell: (x: number, y: number) => void;
-  onChordCell: (x: number, y: number) => void;
-  isPlayerLocked: boolean;
-  onPanStart: (clientX: number, clientY: number) => void;
-  onPanMove: (clientX: number, clientY: number) => void;
-  onPanEnd: () => void;
-}
+const CHUNK_SIZE = 16;
 
-const ChunkLoader: React.FC<ChunkLoaderProps> = ({
-  gameId,
-  visibleChunks,
-  viewport,
-  onRevealCell,
-  onFlagCell,
-  onChordCell,
-  isPlayerLocked,
-  onPanStart,
-  onPanMove,
-  onPanEnd
-}) => {
+const ChunkLoader: React.FC = () => {
   const { socket, isConnected } = useSocket();
+  const { visibleChunks } = useViewportContext();
+  const { gameId } = useGameContext();
   const [chunks, setChunks] = useState<ChunkMap>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +18,6 @@ const ChunkLoader: React.FC<ChunkLoaderProps> = ({
   useEffect(() => {
     if (!socket || !isConnected || !gameId) return;
 
-    // Subscribe to new visible chunks
     visibleChunks.forEach(chunk => {
       const chunkKey = `${chunk.x}_${chunk.y}`;
       if (!chunks[chunkKey]) {
@@ -48,7 +29,6 @@ const ChunkLoader: React.FC<ChunkLoaderProps> = ({
       }
     });
 
-    // Unsubscribe from chunks that are no longer visible
     Object.keys(chunks).forEach(key => {
       const [x, y] = key.split('_').map(Number);
       const isStillVisible = visibleChunks.some(vc => vc.x === x && vc.y === y);
@@ -84,7 +64,7 @@ const ChunkLoader: React.FC<ChunkLoaderProps> = ({
       setIsLoading(false);
     };
 
-    const handleError = (error: any) => {
+    const handleError = (_err: any) => {
       setError('Failed to load chunk data. Please try again.');
       setIsLoading(false);
     };
@@ -115,20 +95,10 @@ const ChunkLoader: React.FC<ChunkLoaderProps> = ({
   }
 
   return (
-    <ChunkedBoard
-      gameId={gameId}
-      viewport={viewport}
-      onRevealCell={onRevealCell}
-      onFlagCell={onFlagCell}
-      onChordCell={onChordCell}
-      isPlayerLocked={isPlayerLocked}
-      onPanStart={onPanStart}
-      onPanMove={onPanMove}
-      onPanEnd={onPanEnd}
-      // @ts-ignore
-      chunks={chunks}
-    />
+    <div style={{ width: '100%', height: '100%' }}>
+      <BoardSVG chunks={chunks} chunkSize={CHUNK_SIZE} />
+    </div>
   );
 };
 
-export default ChunkLoader; 
+export default ChunkLoader;
