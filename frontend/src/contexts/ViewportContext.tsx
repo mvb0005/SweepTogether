@@ -1,12 +1,17 @@
-import React, { createContext, useContext } from 'react';
+import React, { createContext, useContext, useRef } from 'react';
 import { useViewport } from '../hooks/useViewport';
 import { ChunkCoords, Coordinates, ViewportState } from '../types';
 
 const CELL_SIZE = 30;
+const CHUNK_BUFFER = 2;
+const DIRECTION_EXTRA = 1;
 
 export interface ViewportContextValue {
   viewport: ViewportState;
-  visibleChunks: ChunkCoords[];
+  /** Chunks exactly within the visible viewport — subscribe immediately. */
+  immediateChunks: ChunkCoords[];
+  /** Visible + buffer + directional bias — subscribe after debounce. */
+  bufferedChunks: ChunkCoords[];
   onPanStart: (clientX: number, clientY: number) => void;
   onPanMove: (clientX: number, clientY: number) => void;
   onPanEnd: () => void;
@@ -20,18 +25,37 @@ interface ViewportProviderProps {
   children: React.ReactNode;
 }
 
-function getVisibleChunks(viewport: ViewportState, chunkSize: number): ChunkCoords[] {
-  const minChunkX = Math.floor((viewport.center.x - viewport.width / 2) / chunkSize);
-  const maxChunkX = Math.floor((viewport.center.x + viewport.width / 2) / chunkSize);
-  const minChunkY = Math.floor((viewport.center.y - viewport.height / 2) / chunkSize);
-  const maxChunkY = Math.floor((viewport.center.y + viewport.height / 2) / chunkSize);
+function getImmediateChunks(viewport: ViewportState, chunkSize: number): ChunkCoords[] {
+  const minX = Math.floor((viewport.center.x - viewport.width / 2) / chunkSize);
+  const maxX = Math.floor((viewport.center.x + viewport.width / 2) / chunkSize);
+  const minY = Math.floor((viewport.center.y - viewport.height / 2) / chunkSize);
+  const maxY = Math.floor((viewport.center.y + viewport.height / 2) / chunkSize);
+  const chunks: ChunkCoords[] = [];
+  for (let cx = minX; cx <= maxX; cx++)
+    for (let cy = minY; cy <= maxY; cy++)
+      chunks.push({ x: cx, y: cy });
+  return chunks;
+}
+
+function getBufferedChunks(
+  viewport: ViewportState,
+  chunkSize: number,
+  panDir: { dx: number; dy: number }
+): ChunkCoords[] {
+  const minX = Math.floor((viewport.center.x - viewport.width / 2) / chunkSize);
+  const maxX = Math.floor((viewport.center.x + viewport.width / 2) / chunkSize);
+  const minY = Math.floor((viewport.center.y - viewport.height / 2) / chunkSize);
+  const maxY = Math.floor((viewport.center.y + viewport.height / 2) / chunkSize);
+
+  const bufMinX = minX - CHUNK_BUFFER - (panDir.dx < 0 ? DIRECTION_EXTRA : 0);
+  const bufMaxX = maxX + CHUNK_BUFFER + (panDir.dx > 0 ? DIRECTION_EXTRA : 0);
+  const bufMinY = minY - CHUNK_BUFFER - (panDir.dy < 0 ? DIRECTION_EXTRA : 0);
+  const bufMaxY = maxY + CHUNK_BUFFER + (panDir.dy > 0 ? DIRECTION_EXTRA : 0);
 
   const chunks: ChunkCoords[] = [];
-  for (let cx = minChunkX; cx <= maxChunkX; cx++) {
-    for (let cy = minChunkY; cy <= maxChunkY; cy++) {
+  for (let cx = bufMinX; cx <= bufMaxX; cx++)
+    for (let cy = bufMinY; cy <= bufMaxY; cy++)
       chunks.push({ x: cx, y: cy });
-    }
-  }
   return chunks;
 }
 
@@ -54,11 +78,23 @@ export const ViewportProvider: React.FC<ViewportProviderProps> = ({
     initialHeight,
   });
 
-  const visibleChunks = getVisibleChunks(viewport, chunkSize);
+  // Track pan direction from successive center positions without adding state.
+  const prevCenterRef = useRef(viewport.center);
+  const panDirRef = useRef({ dx: 0, dy: 0 });
+  const dx = viewport.center.x - prevCenterRef.current.x;
+  const dy = viewport.center.y - prevCenterRef.current.y;
+  if (dx !== 0 || dy !== 0) {
+    panDirRef.current = { dx: Math.sign(dx), dy: Math.sign(dy) };
+    prevCenterRef.current = viewport.center;
+  }
+
+  const immediateChunks = getImmediateChunks(viewport, chunkSize);
+  const bufferedChunks = getBufferedChunks(viewport, chunkSize, panDirRef.current);
 
   const value: ViewportContextValue = {
     viewport,
-    visibleChunks,
+    immediateChunks,
+    bufferedChunks,
     onPanStart: handlePanStart,
     onPanMove: handlePanMove,
     onPanEnd: handlePanEnd,
@@ -73,8 +109,6 @@ export const ViewportProvider: React.FC<ViewportProviderProps> = ({
 
 export function useViewportContext(): ViewportContextValue {
   const ctx = useContext(ViewportContext);
-  if (!ctx) {
-    throw new Error('useViewportContext must be used within a ViewportProvider');
-  }
+  if (!ctx) throw new Error('useViewportContext must be used within a ViewportProvider');
   return ctx;
 }

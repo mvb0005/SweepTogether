@@ -129,6 +129,44 @@ export function registerSocketHandlers(
     }
   });
 
+  // --- subscribeToChunks (bulk) ---
+  // Joins all requested chunk rooms, processes pending fills, then responds with a
+  // single chunksData event to this socket only (one React state update on the client).
+  socket.on('subscribeToChunks', async (data: { gameId: string; chunks: { chunkX: number; chunkY: number }[] }) => {
+    const { gameId } = data;
+    const results: { gameId: string; chunkX: number; chunkY: number; tiles: any[][] }[] = [];
+    for (const { chunkX, chunkY } of data.chunks) {
+      try {
+        if (!gameStateService.gameExists(gameId)) throw new Error(`Game not found: ${gameId}`);
+        const chunkManager = gameStateService.getChunkManager(gameId);
+        const chunk = chunkManager.getChunk(chunkX, chunkY);
+        socket.join(`${gameId}_chunk_${chunkX}_${chunkY}`);
+        const chunkId = `${chunkX}_${chunkY}`;
+        const fills = chunkManager.pendingFills.get(chunkId) ?? [];
+        if (fills.length > 0) {
+          chunkManager.pendingFills.delete(chunkId);
+          for (const fill of fills) {
+            await gameStateService.runGlobalFloodFill(gameId, chunkX * CHUNK_SIZE + fill.localX, chunkY * CHUNK_SIZE + fill.localY);
+          }
+        }
+        results.push({
+          gameId, chunkX, chunkY,
+          tiles: chunk.tiles.map(row =>
+            row.map(cell => ({
+              x: cell.x, y: cell.y, revealed: cell.revealed, flagged: cell.flagged,
+              ...(cell.revealed && { isMine: cell.isMine, adjacentMines: cell.adjacentMines }),
+            }))
+          ),
+        });
+      } catch (error) {
+        console.error(`[subscribeToChunks] Error for chunk (${chunkX},${chunkY}):`, error);
+      }
+    }
+    if (results.length > 0) {
+      socket.emit('chunksData', results);
+    }
+  });
+
   // --- unsubscribeFromChunk ---
   socket.on('unsubscribeFromChunk', (data: { gameId: string; chunkX: number; chunkY: number }) => {
     const { gameId, chunkX, chunkY } = data;
