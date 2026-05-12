@@ -27,6 +27,17 @@ test-build:
 	docker build -t $(BACKEND_TEST_IMAGE) ./backend
 	@touch .backend-image
 
+pregen: .backend-image
+	docker run --rm \
+		-v "$(PWD)/backend/src:/usr/src/app/src" \
+		-v "$(PWD)/tools:/usr/src/app/tools" \
+		--network sweeptogether_minesweeper-net \
+		-e MONGO_URL="mongodb://mongo_user:mongo_password@mongo:27017/?authSource=admin" \
+		-e DB_NAME="minesweeper_infinite" \
+		-e GAME_ID="default" \
+		$(BACKEND_TEST_IMAGE) \
+		node_modules/.bin/ts-node tools/pregen-chunks.ts
+
 up:
 	docker-compose up --build
 
