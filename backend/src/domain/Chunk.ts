@@ -9,7 +9,14 @@ export class Chunk implements IChunk {
   public readonly size: number;
   private broadcastChunkUpdate?: (chunk: IChunk) => void;
 
-  constructor(chunkX: number, chunkY: number, size: number = CHUNK_SIZE, initialCellGenerator?: (globalX: number, globalY: number) => Cell, broadcastChunkUpdate?: (chunk: IChunk) => void) {
+  constructor(
+    chunkX: number,
+    chunkY: number,
+    size: number = CHUNK_SIZE,
+    initialCellGenerator?: (globalX: number, globalY: number) => Cell,
+    minesOverride?: Uint8Array,
+    broadcastChunkUpdate?: (chunk: IChunk) => void
+  ) {
     this.coordinates = { x: chunkX, y: chunkY };
     this.id = `${chunkX}_${chunkY}`;
     this.size = size;
@@ -23,7 +30,12 @@ export class Chunk implements IChunk {
       for (let x = 0; x < this.size; x++) {
         const globalX = chunkX * this.size + x;
         const globalY = chunkY * this.size + y;
-        if (initialCellGenerator) {
+        if (minesOverride !== undefined) {
+          const isMine = minesOverride[y * size + x] === 1;
+          this.tiles[y][x] = initialCellGenerator
+            ? { ...initialCellGenerator(globalX, globalY), isMine }
+            : { x: globalX, y: globalY, isMine, adjacentMines: 0, revealed: false, flagged: false };
+        } else if (initialCellGenerator) {
           this.tiles[y][x] = initialCellGenerator(globalX, globalY);
         } else {
           // Default cell initialization if no generator is provided

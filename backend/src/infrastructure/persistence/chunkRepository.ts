@@ -24,6 +24,7 @@ export interface ChunkDocument {
   flagged: Buffer;
   loc: [number, number];
   updatedAt: Date;
+  chunkConfig?: { type: 'noise' } | { type: 'custom'; mines: Binary }; // Binary from 'mongodb'
 }
 
 function emptyBuffer(): Buffer {
@@ -153,6 +154,57 @@ export class ChunkRepository {
       );
       if (result.modifiedCount > 0) return;
     }
+  }
+
+  /**
+   * Upserts a chunk document with a custom mine layout.
+   * Used by the pre-gen tool to write hand-authored chunk configurations.
+   */
+  async saveCustomChunk(
+    gameId: string,
+    chunkX: number,
+    chunkY: number,
+    mines: Uint8Array,
+    preRevealedIndices?: number[]
+  ): Promise<void> {
+    const id = this.id(gameId, chunkX, chunkY);
+    const revealedBuf = Buffer.alloc(CELLS_PER_CHUNK, 0xff);
+    const players: string[] = [];
+
+    if (preRevealedIndices && preRevealedIndices.length > 0) {
+      players.push('__world__');
+      for (const idx of preRevealedIndices) {
+        revealedBuf.writeInt8(0, idx); // playerIndex 0 = __world__
+      }
+    }
+
+    await this.collection.updateOne(
+      { _id: id },
+      {
+        $set: {
+          _id: id,
+          gameId, chunkX, chunkY,
+          version: 0,
+          players,
+          revealed: revealedBuf,
+          flagged: emptyBuffer(),
+          loc: [chunkX, chunkY] as [number, number],
+          updatedAt: new Date(),
+          chunkConfig: { type: 'custom', mines: new Binary(Buffer.from(mines)) },
+        },
+      },
+      { upsert: true }
+    );
+  }
+
+  /**
+   * Returns the custom mine layout buffer if the document has chunkConfig.type === 'custom',
+   * otherwise returns undefined (indicating noise-generated mines should be used).
+   */
+  static decodeMines(doc: ChunkDocument): Uint8Array | undefined {
+    if (doc.chunkConfig?.type !== 'custom') return undefined;
+    const buf = doc.chunkConfig.mines;
+    return new Uint8Array(Buffer.isBuffer(buf) ? buf : (buf as Binary).buffer as unknown as Buffer);
   }
 
   /**

@@ -100,7 +100,7 @@ describe('ChunkManager', () => {
     it('should return an existing chunk or create a new one if it does not exist', () => {
       const createdChunk = chunkManager.getChunk(0, 0);
       expect(createdChunk).toBeInstanceOf(MockedChunk);
-      expect(MockedChunk).toHaveBeenCalledWith(0, 0, CHUNK_SIZE, expect.any(Function), expect.any(Function));
+      expect(MockedChunk).toHaveBeenCalledWith(0, 0, CHUNK_SIZE, expect.any(Function), undefined, expect.any(Function));
 
       const retrievedChunk = chunkManager.getChunk(0, 0);
       expect(retrievedChunk).toBe(createdChunk);

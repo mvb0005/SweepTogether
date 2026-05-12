@@ -1,5 +1,9 @@
 import { Cell } from '../domain/types';
 
+export type ChunkConfig =
+  | { type: 'noise' }
+  | { type: 'custom'; mines: Uint8Array }; // 256-byte: 1=mine, 0=open
+
 export interface Coordinate {
   x: number;
   y: number;

@@ -48,7 +48,7 @@ export class ChunkManager implements IChunkManager {
     const chunkId = this.getChunkId(chunkX, chunkY);
     if (!this.chunks.has(chunkId)) {
       // console.log(`BoardManager: Creating new chunk ${chunkId}`);
-      const newChunk = new Chunk(chunkX, chunkY, this.chunkSize, this.worldGenerator, this.broadcastChunkUpdate);
+      const newChunk = new Chunk(chunkX, chunkY, this.chunkSize, this.worldGenerator, undefined, this.broadcastChunkUpdate);
       this.chunks.set(chunkId, newChunk);
       return newChunk;
     }
