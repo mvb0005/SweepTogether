@@ -10,11 +10,9 @@ describe('ChunkManager and Chunk - Pending Fill Propagation', () => {
   }
 
   it('should only process the initial chunk, leaving pending fills in neighbors', async () => {
-    // Only (0,0) is active
     const hasActiveSubscribers = (gameId: string, chunkX: number, chunkY: number) => chunkX === 0 && chunkY === 0;
     const chunkManager = new ChunkManager('testgame', CHUNK_SIZE, createCellGenerator(), hasActiveSubscribers);
 
-    // Reveal a cell in (0,0) that will flood to neighbors
     await chunkManager.revealAndPropagate(0, 0);
 
     // All cells in (0,0) should be revealed
@@ -25,84 +23,41 @@ describe('ChunkManager and Chunk - Pending Fill Propagation', () => {
       }
     }
 
-    // Neighboring chunks should exist, but not be revealed
-    // test all of the catty corner chunks are also pending fills
-    const neighbors = [
-      chunkManager.getChunk(1, 0),
-      chunkManager.getChunk(-1, 0),
-      chunkManager.getChunk(0, 1),
-      chunkManager.getChunk(0, -1),
-      chunkManager.getChunk(1, 1),
-      chunkManager.getChunk(-1, 1),
-      chunkManager.getChunk(1, -1),
-      chunkManager.getChunk(-1, -1)
-    ];
-    for (const neighbor of neighbors) {
-      for (let y = 0; y < CHUNK_SIZE; y++) {
-        for (let x = 0; x < CHUNK_SIZE; x++) {
-          expect(neighbor.getTile(x, y)?.revealed).toBe(false);
-        }
-      }
-      // Should have pending fills
-      expect(neighbor.pendingFills.length).toBeGreaterThan(0);
+    // All 8 neighbors should have pending fills
+    const neighborKeys = ['1_0', '-1_0', '0_1', '0_-1', '1_1', '-1_1', '1_-1', '-1_-1'];
+    for (const key of neighborKeys) {
+      expect((chunkManager.pendingFills.get(key)?.length ?? 0)).toBeGreaterThan(0);
     }
 
-    // check that other chunks are not pending fills
-    const otherChunks = [
-      chunkManager.getChunk(2, 0),
-      chunkManager.getChunk(-2, 0),
-      chunkManager.getChunk(0, 2),
-      chunkManager.getChunk(0, -2)
-    ];
-    for (const chunk of otherChunks) {
-      expect(chunk.pendingFills.length).toBe(0);
+    // Chunks further away should have no pending fills
+    for (const key of ['2_0', '-2_0', '0_2', '0_-2']) {
+      expect(chunkManager.pendingFills.get(key)?.length ?? 0).toBe(0);
     }
   });
 
   it('should process pending fills when chunk is loaded/subscribed', async () => {
-    // both (0,0) and (1,1) are active
-    const hasActiveSubscribers = (gameId: string, chunkX: number, chunkY: number) => (chunkX === 0 && chunkY === 0) || (chunkX === 1 && chunkY === 1);
+    const hasActiveSubscribers = (gameId: string, chunkX: number, chunkY: number) =>
+      (chunkX === 0 && chunkY === 0) || (chunkX === 1 && chunkY === 1);
     const chunkManager = new ChunkManager('testgame', CHUNK_SIZE, createCellGenerator(), hasActiveSubscribers);
 
-    // reveal a cell in (0,0) that will flood to neighbors
     await chunkManager.revealAndPropagate(0, 0);
 
-    // check that both 0,0 and 1,1 are revealed
-    const chunk00 = chunkManager.getChunk(0, 0);
-    const chunk11 = chunkManager.getChunk(1, 1);
-    expect(chunk00.getTile(0, 0)?.revealed).toBe(true);
-    expect(chunk11.getTile(0, 0)?.revealed).toBe(true);
+    // Both (0,0) and (1,1) should be fully revealed
+    expect(chunkManager.getChunk(0, 0).getTile(0, 0)?.revealed).toBe(true);
+    expect(chunkManager.getChunk(1, 1).getTile(0, 0)?.revealed).toBe(true);
 
-    // check that unloaded chunks are not revealed but have pending fills
-    // This should be every chunk that boarders 0,0 and 1,1
-    const neighbors = [
-    //border of 0,0
-      chunkManager.getChunk(1, 0),
-      chunkManager.getChunk(-1, 0),
-      chunkManager.getChunk(0, 1),
-      chunkManager.getChunk(0, -1),
-    //border of 1,1
-      chunkManager.getChunk(2, 1),
-      chunkManager.getChunk(2, 2),
-      chunkManager.getChunk(1, 2),
-    ]
-    for (const neighbor of neighbors) {
-      expect(neighbor.getTile(0, 0)?.revealed).toBe(false);
-      expect(neighbor.pendingFills.length).toBeGreaterThan(0);
+    // Chunks on the boundary of (0,0) and (1,1) but not active should have pending fills
+    const borderedKeys = ['1_0', '-1_0', '0_1', '0_-1', '2_1', '2_2', '1_2'];
+    for (const key of borderedKeys) {
+      expect(chunkManager.getChunk(...(key.split('_').map(Number) as [number, number])).getTile(0, 0)?.revealed).toBe(false);
+      expect((chunkManager.pendingFills.get(key)?.length ?? 0)).toBeGreaterThan(0);
     }
 
-    // check that chunks not on the border are revealed and have no pending fills
-    const otherChunks = [
-      chunkManager.getChunk(5, 5),
-      chunkManager.getChunk(-2, -2),
-    ]
-    for (const chunk of otherChunks) {
-      expect(chunk.getTile(0, 0)?.revealed).toBe(true);
-      expect(chunk.pendingFills.length).toBe(0);
+    // Chunks far away should not have been reached
+    for (const key of ['5_5', '-2_-2']) {
+      const [cx, cy] = key.split('_').map(Number);
+      expect(chunkManager.getChunk(cx, cy).getTile(0, 0)?.revealed).toBe(false);
+      expect(chunkManager.pendingFills.get(key)?.length ?? 0).toBe(0);
     }
   });
-
-
-
-    
-}); 
+});

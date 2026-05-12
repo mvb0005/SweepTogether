@@ -1,5 +1,16 @@
 # Minesweeper Infinite TODO
 
+## Session 36: Player Sessions & Navigation
+
+Full spec in [`prompts/SESSION_36_Player_Sessions_Navigation.md`](./prompts/SESSION_36_Player_Sessions_Navigation.md). Prerequisite: Session 35 MongoDB persistence (done).
+
+- [ ] **Player session tracking** — `sessions` collection with TTL index (60s), updated via `updateViewport` socket event (debounced ~500ms on client), deleted on disconnect
+- [ ] **"Where is everyone?"** — `getActivePlayers` socket event returns `{ playerId, x, y }[]` for sessions active in last 30s; client renders minimap dots
+- [ ] **Named locations / bookmarks** — `locations` collection with 2D index; `createLocation` / `getNearbyLocations` socket events; client UI to save and browse named spots
+- [ ] **Jump to active area** — `getHotspot` socket event finds chunk with highest `updatedAt` in last hour; client pans to it
+- [ ] **URL-based navigation** — wire `?x=N&y=N` query params to `ViewportProvider`'s `initialCenter`
+- [ ] **Indexes**: TTL on `sessions.updatedAt`, 2D on `sessions.(gameId, loc)`, 2D on `locations.(gameId, loc)`
+
 ## Integration Tests as Sidecar
 
 ✅ Created dedicated integration test container infrastructure:

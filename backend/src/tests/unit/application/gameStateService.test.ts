@@ -6,6 +6,23 @@ import { SpatialHashGrid } from '../../../domain/spatialHashGrid';
 // Mock WorldGenerator to prevent actual noise generation and control its methods
 jest.mock('../../../domain/worldGenerator');
 
+// Mock persistence layer so unit tests don't need a real database
+jest.mock('../../../infrastructure/persistence/db', () => ({
+    getGameRepository: () => ({ createOrLoad: jest.fn().mockResolvedValue(12345) }),
+    getChunkRepository: () => ({
+        ensure: jest.fn().mockResolvedValue(undefined),
+        getOrAddPlayerIndex: jest.fn().mockResolvedValue(0),
+        revealCells: jest.fn().mockResolvedValue(undefined),
+        setFlagged: jest.fn().mockResolvedValue(undefined),
+        load: jest.fn().mockResolvedValue(null),
+    }),
+    getPendingFillsRepository: () => ({
+        loadAll: jest.fn().mockResolvedValue(new Map()),
+        save: jest.fn().mockResolvedValue(undefined),
+        delete: jest.fn().mockResolvedValue(undefined),
+    }),
+}));
+
 const MockWorldGenerator = WorldGenerator as jest.MockedClass<typeof WorldGenerator>;
 
 const SPATIAL_GRID_CELL_SIZE = 16; // Should match the constant in gameStateService.ts
@@ -293,8 +310,8 @@ describe('GameStateService', () => {
     });
 
     describe('createGame', () => {
-        it('should create a new game with the given config and ID', () => {
-            gameStateService.createGame(GAME_ID_1, initialGameConfig);
+        it('should create a new game with the given config and ID', async () => {
+            await gameStateService.createGame(GAME_ID_1, initialGameConfig);
             const game = gameStateService.getGame(GAME_ID_1);
             expect(game).toBeDefined();
             expect(game?.gameId).toBe(GAME_ID_1);
@@ -304,17 +321,16 @@ describe('GameStateService', () => {
             expect(game?.spatialGrid).toBeInstanceOf(SpatialHashGrid);
         });
 
-        it('should throw an error if a game with the ID already exists', () => {
-            gameStateService.createGame(GAME_ID_1, initialGameConfig);
-            expect(() => gameStateService.createGame(GAME_ID_1, initialGameConfig)).toThrow(
-                `Game with ID ${GAME_ID_1} already exists.`
-            );
+        it('should not create a duplicate game if one already exists', async () => {
+            await gameStateService.createGame(GAME_ID_1, initialGameConfig);
+            await gameStateService.createGame(GAME_ID_1, initialGameConfig);
+            expect(gameStateService.getAllGameIds()).toEqual([GAME_ID_1]);
         });
     });
 
     describe('addPlayer', () => {
-        beforeEach(() => {
-            gameStateService.createGame(GAME_ID_1, initialGameConfig);
+        beforeEach(async () => {
+            await gameStateService.createGame(GAME_ID_1, initialGameConfig);
         });
 
         it('should add a player to the game', () => {
@@ -345,8 +361,8 @@ describe('GameStateService', () => {
     });
 
     describe('gameExists', () => {
-        it('should return true if game exists', () => {
-            gameStateService.createGame(GAME_ID_1, initialGameConfig);
+        it('should return true if game exists', async () => {
+            await gameStateService.createGame(GAME_ID_1, initialGameConfig);
             expect(gameStateService.gameExists(GAME_ID_1)).toBe(true);
         });
 
@@ -356,8 +372,8 @@ describe('GameStateService', () => {
     });
 
     describe('setPlayerStatus', () => {
-        beforeEach(() => {
-            gameStateService.createGame(GAME_ID_1, initialGameConfig);
+        beforeEach(async () => {
+            await gameStateService.createGame(GAME_ID_1, initialGameConfig);
             gameStateService.addPlayer(GAME_ID_1, PLAYER_ID_1, USERNAME_1);
         });
 

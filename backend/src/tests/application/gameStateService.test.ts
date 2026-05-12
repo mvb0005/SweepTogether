@@ -1,44 +1,49 @@
 import { GameStateService } from '../../application/gameStateService';
-import { GameConfig, PlayerStatus, Cell } from '../../domain/types';
+import { GameConfig, PlayerStatus, Cell, GameState } from '../../domain/types';
 import { WorldGenerator } from '../../domain/worldGenerator';
-import { BoardManager } from '../../domain/ChunkManager';
-import { IBoardManager, CHUNK_SIZE } from '../../types/chunkTypes';
+import { ChunkManager } from '../../domain/ChunkManager';
+import { IChunkManager, CHUNK_SIZE } from '../../types/chunkTypes';
 import { SpatialHashGrid } from '../../domain/spatialHashGrid';
 
-// Mock WorldGenerator and BoardManager
-jest.mock('../../domain/worldGenerator'); // Corrected path
+jest.mock('../../infrastructure/persistence/db', () => ({
+    getGameRepository: () => ({ createOrLoad: jest.fn().mockResolvedValue(12345) }),
+    getChunkRepository: () => ({
+        ensure: jest.fn().mockResolvedValue(undefined),
+        getOrAddPlayerIndex: jest.fn().mockResolvedValue(0),
+        revealCells: jest.fn().mockResolvedValue(undefined),
+        setFlagged: jest.fn().mockResolvedValue(undefined),
+        load: jest.fn().mockResolvedValue(null),
+    }),
+    getPendingFillsRepository: () => ({
+        loadAll: jest.fn().mockResolvedValue(new Map()),
+        save: jest.fn().mockResolvedValue(undefined),
+        delete: jest.fn().mockResolvedValue(undefined),
+    }),
+}));
+
+// Mock WorldGenerator and ChunkManager
+jest.mock('../../domain/worldGenerator');
 jest.mock('../../domain/ChunkManager', () => {
-    const MockedBoardManager = jest.fn().mockImplementation((gameId, boardConfig, gameStateService, eventBus, worldGenerator) => {
+    const MockedChunkManager = jest.fn().mockImplementation(() => {
         return {
-            gameId: gameId,
-            boardConfig: boardConfig,
-            gameStateService: gameStateService,
-            eventBus: eventBus,
-            worldGenerator: worldGenerator,
             initializeBoard: jest.fn(),
             getChunk: jest.fn(),
             loadChunk: jest.fn(),
             ensureChunksAroundPlayer: jest.fn(),
             getLoadedChunks: jest.fn().mockReturnValue([]),
-            getChunkKey: jest.fn((x, y) => `${x},${y}`),
-            spatialGrid: { 
-                getCellsInBounds: jest.fn().mockReturnValue([]),
-                set: jest.fn(),
-                get: jest.fn(),
-                delete: jest.fn(),
-                clear: jest.fn()
-            },
+            getChunkKey: jest.fn((x: number, y: number) => `${x},${y}`),
+            pendingFills: new Map(),
             convertGlobalToChunkLocalCoordinates: jest.fn(),
-            revealTile: jest.fn(), 
+            revealTile: jest.fn(),
             flagTile: jest.fn(),
             chordTile: jest.fn(),
         };
     });
-    return { BoardManager: MockedBoardManager };
+    return { ChunkManager: MockedChunkManager };
 });
 
 const MockedWorldGenerator = WorldGenerator as jest.MockedClass<typeof WorldGenerator>;
-const MockedBoardManager = BoardManager as jest.MockedClass<typeof BoardManager>;
+const MockedChunkManager = ChunkManager as jest.MockedClass<typeof ChunkManager>;
 
 describe('GameStateService', () => {
     let gameStateService: GameStateService;
@@ -55,7 +60,7 @@ describe('GameStateService', () => {
         gameStateService = new GameStateService();
         // Clear all mocks before each test
         MockedWorldGenerator.mockClear();
-        MockedBoardManager.mockClear();
+        MockedChunkManager.mockClear();
         // Mock the getCellValue for any WorldGenerator instance
         MockedWorldGenerator.prototype.getCellValue = jest.fn().mockImplementation((x, y) => {
             // Default mock behavior: no mines, all cells are 0
@@ -65,8 +70,8 @@ describe('GameStateService', () => {
     });
 
     describe('Game Creation and Retrieval', () => {
-        it('should create a new game with initial state', () => {
-            gameStateService.createGame(gameId1, mockGameConfig);
+        it('should create a new game with initial state', async () => {
+            await gameStateService.createGame(gameId1, mockGameConfig);
             const game = gameStateService.getGame(gameId1);
 
             expect(game).toBeDefined();
@@ -75,19 +80,18 @@ describe('GameStateService', () => {
             expect(game?.players).toEqual({});
             expect(game?.gameOver).toBe(false);
             expect(game?.spatialGrid).toBeInstanceOf(SpatialHashGrid);
-            expect(MockedWorldGenerator).toHaveBeenCalledWith(gameId1);
-            expect(MockedBoardManager).toHaveBeenCalledTimes(1);
+            expect(MockedWorldGenerator).toHaveBeenCalledWith('12345');
+            expect(MockedChunkManager).toHaveBeenCalledTimes(1);
         });
 
-        it('should throw an error if creating a game that already exists', () => {
-            gameStateService.createGame(gameId1, mockGameConfig);
-            expect(() => gameStateService.createGame(gameId1, mockGameConfig)).toThrow(
-                `Game with ID ${gameId1} already exists.`
-            );
+        it('should not create a duplicate game if one already exists', async () => {
+            await gameStateService.createGame(gameId1, mockGameConfig);
+            await gameStateService.createGame(gameId1, mockGameConfig);
+            expect(MockedChunkManager).toHaveBeenCalledTimes(1);
         });
 
-        it('should retrieve an existing game', () => {
-            gameStateService.createGame(gameId1, mockGameConfig);
+        it('should retrieve an existing game', async () => {
+            await gameStateService.createGame(gameId1, mockGameConfig);
             const game = gameStateService.getGame(gameId1);
             expect(game).toBeDefined();
         });
@@ -97,117 +101,39 @@ describe('GameStateService', () => {
             expect(game).toBeUndefined();
         });
 
-        it('should confirm a game exists', () => {
-            gameStateService.createGame(gameId1, mockGameConfig);
+        it('should confirm a game exists', async () => {
+            await gameStateService.createGame(gameId1, mockGameConfig);
             expect(gameStateService.gameExists(gameId1)).toBe(true);
             expect(gameStateService.gameExists('nonExistentGame')).toBe(false);
         });
 
-        it('should get all game IDs', () => {
-            gameStateService.createGame(gameId1, mockGameConfig);
-            gameStateService.createGame(gameId2, mockGameConfig);
+        it('should get all game IDs', async () => {
+            await gameStateService.createGame(gameId1, mockGameConfig);
+            await gameStateService.createGame(gameId2, mockGameConfig);
             const ids = gameStateService.getAllGameIds();
             expect(ids).toContain(gameId1);
             expect(ids).toContain(gameId2);
             expect(ids.length).toBe(2);
         });
 
-        it('should remove a game and its associated instances', () => {
-            gameStateService.createGame(gameId1, mockGameConfig);
-            gameStateService.getBoardManager(gameId1);
+        it('should remove a game and its associated instances', async () => {
+            await gameStateService.createGame(gameId1, mockGameConfig);
+            expect(gameStateService.getChunkManager(gameId1)).toBeDefined();
 
             gameStateService.removeGame(gameId1);
             expect(gameStateService.getGame(gameId1)).toBeUndefined();
-            expect(MockedWorldGenerator).toHaveBeenCalledTimes(1);
-            expect(MockedBoardManager).toHaveBeenCalledTimes(1);
-
-            const newBm = gameStateService.getBoardManager(gameId1);
-            expect(newBm).toBeDefined();
-            expect(MockedWorldGenerator).toHaveBeenCalledTimes(2);
-            expect(MockedBoardManager).toHaveBeenCalledTimes(2);
-        });
-    });
-
-    describe('BoardManager and WorldGenerator Management', () => {
-        it('should return an existing BoardManager or create a new one', () => {
-            const bm1 = gameStateService.getBoardManager(gameId1);
-            expect(bm1).toBeDefined();
-            expect(MockedWorldGenerator).toHaveBeenCalledWith(gameId1);
-            expect(MockedBoardManager).toHaveBeenCalledTimes(1);
-            expect(MockedBoardManager).toHaveBeenCalledWith(
-                mockGameConfig,
-                expect.any(Function),
-                gameId1
-            );
-
-            const bm2 = gameStateService.getBoardManager(gameId1);
-            expect(bm2).toBe(bm1);
-            expect(MockedWorldGenerator).toHaveBeenCalledTimes(1);
-            expect(MockedBoardManager).toHaveBeenCalledTimes(1);
-        });
-
-        it('should create different BoardManager instances for different game IDs', () => {
-            const bm1 = gameStateService.getBoardManager(gameId1);
-            const bm2 = gameStateService.getBoardManager(gameId2);
-
-            expect(bm1).not.toBe(bm2);
-            expect(MockedWorldGenerator).toHaveBeenCalledWith(gameId1);
-            expect(MockedWorldGenerator).toHaveBeenCalledWith(gameId2);
-            expect(MockedWorldGenerator).toHaveBeenCalledTimes(2);
-            expect(MockedBoardManager).toHaveBeenCalledTimes(2);
-        });
-
-        it('cellGenerator passed to BoardManager should use the correct WorldGenerator', () => {
-            const mockCellValueGame1 = jest.fn().mockReturnValue(1);
-            const mockCellValueGame2 = jest.fn().mockReturnValue(2);
-
-            MockedWorldGenerator
-                .mockImplementationOnce(function(this: WorldGenerator, seed: string) {
-                    this.getCellValue = mockCellValueGame1;
-                    this.isMine = jest.fn().mockReturnValue(false);
-                    return this;
-                } as any)
-                .mockImplementationOnce(function(this: WorldGenerator, seed: string) {
-                    this.getCellValue = mockCellValueGame2;
-                    this.isMine = jest.fn().mockReturnValue(false);
-                    return this;
-                } as any);
-
-            // Clear mocks specifically for this test to ensure call count is predictable
-            MockedBoardManager.mockClear();
-
-            const bm1 = gameStateService.getBoardManager(gameId1);
-            // First call to BoardManager constructor is at index 0
-            const cellGenerator1 = MockedBoardManager.mock.calls[0] && MockedBoardManager.mock.calls[0][1];
-            if (cellGenerator1) {
-                const cell1 = cellGenerator1(10, 20);
-                expect(mockCellValueGame1).toHaveBeenCalledWith(10, 20);
-                expect(cell1.adjacentMines).toBe(1);
-            } else {
-                throw new Error("cellGenerator1 was not found");
-            }
-
-            const bm2 = gameStateService.getBoardManager(gameId2);
-            // Second call to BoardManager constructor is at index 1
-            const cellGenerator2 = MockedBoardManager.mock.calls[1] && MockedBoardManager.mock.calls[1][1];
-            if (cellGenerator2) {
-                const cell2 = cellGenerator2(30, 40);
-                expect(mockCellValueGame2).toHaveBeenCalledWith(30, 40);
-                expect(cell2.adjacentMines).toBe(2);
-            } else {
-                throw new Error("cellGenerator2 was not found");
-            }
+            expect(() => gameStateService.getChunkManager(gameId1)).toThrow();
         });
     });
 
     describe('Cell State Management (getCell, updateGridCells, updateGridCell)', () => {
-        beforeEach(() => {
-            gameStateService.createGame(gameId1, mockGameConfig);
+        beforeEach(async () => {
+            await gameStateService.createGame(gameId1, mockGameConfig);
         });
 
         it('getCell should return correct cell state (non-mine)', async () => {
-            MockedWorldGenerator.prototype.getCellValue = jest.fn().mockReturnValue(3);
-            MockedWorldGenerator.prototype.isMine = jest.fn().mockReturnValue(false);
+            const worldGen = gameStateService['worldGenerators'].get(gameId1)!;
+            (worldGen.getCellValue as jest.Mock).mockReturnValue(3);
 
             const game = gameStateService.getGame(gameId1)!;
             const cell = await gameStateService.getCell(game, 5, 5);
@@ -220,12 +146,12 @@ describe('GameStateService', () => {
                 revealed: false,
                 flagged: false,
             });
-            expect(MockedWorldGenerator.prototype.getCellValue).toHaveBeenCalledWith(5, 5);
+            expect(worldGen.getCellValue).toHaveBeenCalledWith(5, 5);
         });
 
         it('getCell should return correct cell state (mine)', async () => {
-            MockedWorldGenerator.prototype.getCellValue = jest.fn().mockReturnValue('M');
-            MockedWorldGenerator.prototype.isMine = jest.fn().mockReturnValue(true);
+            const worldGen = gameStateService['worldGenerators'].get(gameId1)!;
+            (worldGen.getCellValue as jest.Mock).mockReturnValue('M');
 
             const game = gameStateService.getGame(gameId1)!;
             const cell = await gameStateService.getCell(game, 7, 7);
@@ -238,7 +164,7 @@ describe('GameStateService', () => {
                 revealed: false,
                 flagged: false,
             });
-            expect(MockedWorldGenerator.prototype.getCellValue).toHaveBeenCalledWith(7, 7);
+            expect(worldGen.getCellValue).toHaveBeenCalledWith(7, 7);
         });
 
         it('getCell should reflect revealed state from spatialGrid', async () => {
@@ -289,23 +215,23 @@ describe('GameStateService', () => {
             expect(game.spatialGrid!.get(1, 1)).toBeUndefined();
         });
 
-        it('should correctly update cell revealed and flagged status via updateGridCell', () => {
+        it('should correctly update cell revealed and flagged status via updateGridCell', async () => {
             const gameId = 'testGameUpdateCell';
             const boardConfig: GameConfig = { isInfiniteWorld: true, rows: 5, cols: 5, mines: 1 };
-            gameStateService.createGame(gameId, boardConfig);
-            const boardManager = gameStateService.getBoardManager(gameId) as BoardManager; // Changed cast
+            await gameStateService.createGame(gameId, boardConfig);
+            const game = gameStateService.getGame(gameId)!;
 
             const cellToUpdate: Cell = { x: 1, y: 1, isMine: false, adjacentMines: 0, revealed: true, flagged: false };
             gameStateService.updateGridCell(gameId, cellToUpdate);
 
-            expect((boardManager as any).spatialGrid.get(1, 1)).toEqual({ revealed: true, flagged: false });
+            expect(game.spatialGrid!.get(1, 1)).toEqual({ revealed: true, flagged: false });
         });
 
-        it('should correctly update multiple cells via updateGridCells', () => {
+        it('should correctly update multiple cells via updateGridCells', async () => {
             const gameId = 'testGameUpdateCells';
             const boardConfig: GameConfig = { isInfiniteWorld: true, rows: 5, cols: 5, mines: 1 };
-            gameStateService.createGame(gameId, boardConfig);
-            const boardManager = gameStateService.getBoardManager(gameId) as BoardManager; // Changed cast
+            await gameStateService.createGame(gameId, boardConfig);
+            const game = gameStateService.getGame(gameId)!;
 
             const cellsToUpdate: Cell[] = [
                 { x: 1, y: 1, isMine: false, adjacentMines: 0, revealed: true, flagged: false },
@@ -313,29 +239,21 @@ describe('GameStateService', () => {
             ];
             gameStateService.updateGridCells(gameId, cellsToUpdate);
 
-            expect((boardManager as any).spatialGrid.get(1, 1)).toEqual({ revealed: true, flagged: false });
-            expect((boardManager as any).spatialGrid.get(2, 2)).toEqual({ revealed: false, flagged: true });
+            expect(game.spatialGrid!.get(1, 1)).toEqual({ revealed: true, flagged: false });
+            expect(game.spatialGrid!.get(2, 2)).toEqual({ revealed: false, flagged: true });
         });
 
-        it('should remove a game and its associated WorldGenerator and BoardManager', () => {
+        it('should remove a game and its associated WorldGenerator and ChunkManager', async () => {
             const gameId = 'gameToRemove';
-            gameStateService.createGame(gameId, { isInfiniteWorld: true, rows: 10, cols: 10, mines: 10 });
+            await gameStateService.createGame(gameId, { isInfiniteWorld: true, rows: 10, cols: 10, mines: 10 });
             expect(gameStateService.gameExists(gameId)).toBe(true);
-            const bm = gameStateService.getBoardManager(gameId);
-            expect(bm).toBeDefined();
-            const wg = gameStateService['worldGenerators'].get(gameId);
-            expect(wg).toBeDefined();
+            expect(gameStateService.getChunkManager(gameId)).toBeDefined();
+            expect(gameStateService['worldGenerators'].get(gameId)).toBeDefined();
 
             gameStateService.removeGame(gameId);
             expect(gameStateService.gameExists(gameId)).toBe(false);
             expect(gameStateService['worldGenerators'].has(gameId)).toBe(false);
-            expect(gameStateService['boardManagers'].has(gameId)).toBe(false);
-
-            const newBmAttempt = gameStateService.getBoardManager(gameId);
-            expect(newBmAttempt).toBeDefined();
-            expect(newBmAttempt).not.toBe(bm);
-            const newWgAttempt = gameStateService['worldGenerators'].get(gameId);
-            expect(newWgAttempt).toBeDefined();
+            expect(gameStateService['chunkManagers'].has(gameId)).toBe(false);
         });
     });
 
@@ -343,8 +261,8 @@ describe('GameStateService', () => {
         const playerId1 = 'player1';
         const username1 = 'UserOne';
 
-        beforeEach(() => {
-            gameStateService.createGame(gameId1, mockGameConfig);
+        beforeEach(async () => {
+            await gameStateService.createGame(gameId1, mockGameConfig);
         });
 
         it('should add a player to a game', () => {
@@ -393,61 +311,5 @@ describe('GameStateService', () => {
         });
     });
 
-    describe('getCellsInChunk', () => {
-        it('should return cells from the spatial grid for the given chunk coordinates', () => {
-            const gameId = 'game1';
-            const chunkX = 0;
-            const chunkY = 0;
-            const mockCells: Cell[] = [{ x: 0, y: 0, isMine: false, revealed: false, adjacentMines: 0, flagged: false }];
-            
-            const mockGameState = {
-                boardConfig: { isInfiniteWorld: true, CHUNK_SIZE },
-            } as unknown as GameState; // Cast for simplicity in test
-            (gameStateService.getGame as jest.Mock).mockReturnValue(mockGameState);
-
-            const mockBoardConfig = { CHUNK_SIZE: 16, isInfiniteWorld: true };
-            const mockBMInstance = {
-                boardConfig: mockBoardConfig,
-                spatialGrid: { 
-                    getCellsInBounds: jest.fn().mockReturnValue(mockCells)
-                }
-            };
-            (gameStateService.getBoardManager as jest.Mock).mockReturnValue(mockBMInstance);
-
-            const result = gameStateService.getCellsInChunk(gameId, chunkX, chunkY);
-
-            expect(gameStateService.getBoardManager).toHaveBeenCalledWith(gameId);
-            const expectedBounds = {
-                minX: chunkX * CHUNK_SIZE,
-                minY: chunkY * CHUNK_SIZE,
-                maxX: (chunkX + 1) * CHUNK_SIZE - 1,
-                maxY: (chunkY + 1) * CHUNK_SIZE - 1,
-            };
-            expect(mockBMInstance.spatialGrid.getCellsInBounds).toHaveBeenCalledWith(expectedBounds);
-            expect(result).toEqual(mockCells);
-        });
-
-        it('should return an empty array if BoardManager is not found', () => {
-            const gameId = 'game1';
-            const chunkX = 0;
-            const chunkY = 0;
-            (gameStateService.getBoardManager as jest.Mock).mockReturnValue(null);
-
-            const result = gameStateService.getCellsInChunk(gameId, chunkX, chunkY);
-            expect(result).toEqual([]);
-        });
-
-        it('should return an empty array if spatialGrid is not on BoardManager', () => {
-            const gameId = 'game1';
-            const chunkX = 0;
-            const chunkY = 0;
-            const mockBMInstance = {
-                boardConfig: { CHUNK_SIZE: 16, isInfiniteWorld: true },
-            };
-            (gameStateService.getBoardManager as jest.Mock).mockReturnValue(mockBMInstance);
-        
-            const result = gameStateService.getCellsInChunk(gameId, chunkX, chunkY);
-            expect(result).toEqual([]);
-        });
-    });
 });
+

@@ -127,4 +127,4 @@ dist
 docker-compose.override.yml
 
 # Local env files
-.venv
+.venv.backend-image

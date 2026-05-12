@@ -113,14 +113,22 @@ export class ChunkManager implements IChunkManager {
     const chunksWithPendingFills = Object.keys(initialFill.pendingFills);
 
     this.addPendingFillsToChunks(initialFill.pendingFills);
-    
-    for (const chunkId of chunksWithPendingFills) {
-      const [chunkX, chunkY] = chunkId.split('_').map(Number);
-      if (this.hasActiveSubscribers(this.gameId, chunkX, chunkY)) {
-        await this.processPendingFillsForChunk(chunkId, visited);
-        this.broadcastChunkUpdate(this.getChunk(chunkX, chunkY));
+
+    // Drain iteratively: each chunk's fill may spill new pending fills into already-active neighbors
+    let hasMore: boolean;
+    do {
+      hasMore = false;
+      for (const [chunkId] of [...this.pendingFills.entries()]) {
+        if ((this.pendingFills.get(chunkId)?.length ?? 0) === 0) continue;
+        const [chunkX, chunkY] = chunkId.split('_').map(Number);
+        if (this.hasActiveSubscribers(this.gameId, chunkX, chunkY)) {
+          await this.processPendingFillsForChunk(chunkId, visited);
+          this.broadcastChunkUpdate(this.getChunk(chunkX, chunkY));
+          hasMore = true;
+        }
       }
-    }
+    } while (hasMore);
+
     return initialFill.revealedCells;
   }
 
@@ -142,7 +150,7 @@ export class ChunkManager implements IChunkManager {
    * Process all pending fills for a chunk (if any), then clear them from the queue.
    * Accepts a global visited set for cross-chunk propagation.
    */
-  public async processPendingFillsForChunk(chunkId: string, visited: Set<string>): Promise<void> {
+  public async processPendingFillsForChunk(chunkId: string, visited: Set<string> = new Set()): Promise<void> {
     const fills = this.pendingFills.get(chunkId) || [];
     console.log(`[ChunkManager] processPendingFillsForChunk called for chunkId=${chunkId}, numFills=${fills.length}`);
     if (fills.length === 0) return;

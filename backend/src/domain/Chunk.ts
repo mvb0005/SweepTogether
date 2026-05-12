@@ -59,7 +59,7 @@ export class Chunk implements IChunk {
     startY: number, 
     originalMineCountHint: number | undefined, 
     boardManager: IChunkManager,
-    visited: Set<string>
+    visited: Set<string> = new Set()
   ): Promise<FloodFillResult> {
     const queue: { x: number; y: number }[] = [{ x: startX, y: startY }];
     const revealedCellsInThisFill: Cell[] = [];

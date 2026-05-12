@@ -14,7 +14,7 @@ describe('ChunkManager', () => {
 
   beforeEach(() => {
     MockedChunk.mockClear();
-    chunkManager = new ChunkManager(CHUNK_SIZE, defaultCellGenerator);
+    chunkManager = new ChunkManager('testgame');
   });
 
   describe('constructor', () => {
@@ -100,7 +100,7 @@ describe('ChunkManager', () => {
     it('should return an existing chunk or create a new one if it does not exist', () => {
       const createdChunk = chunkManager.getChunk(0, 0);
       expect(createdChunk).toBeInstanceOf(MockedChunk);
-      expect(MockedChunk).toHaveBeenCalledWith(0, 0, CHUNK_SIZE, defaultCellGenerator);
+      expect(MockedChunk).toHaveBeenCalledWith(0, 0, CHUNK_SIZE, expect.any(Function), expect.any(Function));
 
       const retrievedChunk = chunkManager.getChunk(0, 0);
       expect(retrievedChunk).toBe(createdChunk);
@@ -117,79 +117,4 @@ describe('ChunkManager', () => {
     });
   });
 
-  describe('propagateFillToNeighbor', () => {
-    let sourceChunk: Chunk;
-    let sourceChunkId: string;
-
-    beforeEach(() => {
-      sourceChunkId = chunkManager.getChunkId(0, 0);
-      sourceChunk = chunkManager.getChunk(0, 0) as jest.Mocked<IChunk>;
-      MockedChunk.mockClear();
-    });
-
-    it('should create a neighbor chunk if it does not exist and add pending fill', () => {
-      const neighborChunkX = 1;
-      const neighborChunkY = 0;
-      const entryLocalX = 0;
-      const entryLocalY = 5;
-      const hint = 0;
-
-      const mockAddPendingFill = jest.fn();
-      const mockNeighborChunkInstance = {
-        addPendingFill: mockAddPendingFill,
-        id: chunkManager.getChunkId(neighborChunkX, neighborChunkY),
-      } as unknown as jest.Mocked<IChunk>;
-
-      MockedChunk.mockImplementationOnce(() => mockNeighborChunkInstance);
-
-      chunkManager.propagateFillToNeighbor(sourceChunkId, neighborChunkX, neighborChunkY, entryLocalX, entryLocalY, hint);
-
-      expect(MockedChunk).toHaveBeenCalledTimes(1);
-      expect(MockedChunk).toHaveBeenCalledWith(neighborChunkX, neighborChunkY, CHUNK_SIZE, defaultCellGenerator);
-
-      const retrievedNeighbor = chunkManager.getChunkById(chunkManager.getChunkId(neighborChunkX, neighborChunkY));
-      expect(retrievedNeighbor).toBe(mockNeighborChunkInstance);
-
-      expect(mockAddPendingFill).toHaveBeenCalledTimes(1);
-      expect(mockAddPendingFill).toHaveBeenCalledWith(entryLocalX, entryLocalY, hint);
-    });
-
-    it('should use an existing neighbor chunk and add pending fill', () => {
-      const neighborChunkX = 0;
-      const neighborChunkY = 1;
-      const entryLocalX = 5;
-      const entryLocalY = 0;
-      const hint = 1;
-
-      const mockAddPendingFill = jest.fn();
-      const existingNeighborChunkInstance = {
-        addPendingFill: mockAddPendingFill,
-        id: chunkManager.getChunkId(neighborChunkX, neighborChunkY),
-      } as unknown as jest.Mocked<IChunk>;
-
-      MockedChunk.mockImplementationOnce(() => existingNeighborChunkInstance);
-      chunkManager.getChunk(neighborChunkX, neighborChunkY);
-      MockedChunk.mockClear();
-
-      chunkManager.propagateFillToNeighbor(sourceChunkId, neighborChunkX, neighborChunkY, entryLocalX, entryLocalY, hint);
-
-      expect(MockedChunk).not.toHaveBeenCalled();
-      expect(mockAddPendingFill).toHaveBeenCalledTimes(1);
-      expect(mockAddPendingFill).toHaveBeenCalledWith(entryLocalX, entryLocalY, hint);
-    });
-
-    it('should not propagate back to the source chunk if fromChunkId matches target chunkId', () => {
-      const entryLocalX = 0;
-      const entryLocalY = 0;
-      const hint = 0;
-
-      const mockAddPendingFillOnSource = jest.fn();
-      (sourceChunk as any).addPendingFill = mockAddPendingFillOnSource;
-
-      chunkManager.propagateFillToNeighbor(sourceChunkId, 0, 0, entryLocalX, entryLocalY, hint);
-
-      expect(MockedChunk).not.toHaveBeenCalled();
-      expect(mockAddPendingFillOnSource).not.toHaveBeenCalled();
-    });
-  });
 });

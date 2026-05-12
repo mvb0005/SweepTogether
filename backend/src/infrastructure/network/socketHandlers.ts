@@ -7,6 +7,7 @@ import { CHUNK_SIZE } from '../../types/chunkTypes';
 import { EventBus } from '../eventBus/EventBus';
 import { SocketEventMap } from './socketEvents';
 import { GameStateService } from '../../application/gameStateService';
+import { getPendingFillsRepository } from '../persistence/db';
 
 /**
  * Helper function to emit error messages to a client
@@ -48,7 +49,7 @@ export function registerSocketHandlers(
           cols: 16,
           mines: 40,
         };
-        gameStateService.createGame(gameId, defaultConfig);
+        await gameStateService.createGame(gameId, defaultConfig);
       }
       const playerId = socket.id;
       gameStateService.addPlayer(gameId, playerId, username);
@@ -89,6 +90,9 @@ export function registerSocketHandlers(
       // getChunk auto-creates the chunk if it doesn't yet exist
       const chunk = chunkManager.getChunk(chunkX, chunkY);
 
+      // Apply any persisted revealed/flagged state from MongoDB onto the fresh chunk
+      await gameStateService.applyPersistedChunkState(gameId, chunkX, chunkY);
+
       // Join the chunk room
       const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
       socket.join(chunkRoom);
@@ -99,10 +103,11 @@ export function registerSocketHandlers(
       const fills = chunkManager.pendingFills.get(chunkId) ?? [];
       if (fills.length > 0) {
         chunkManager.pendingFills.delete(chunkId);
+        try { await getPendingFillsRepository().delete(gameId, chunkId); } catch {}
         for (const fill of fills) {
           const globalX = chunkX * CHUNK_SIZE + fill.localX;
           const globalY = chunkY * CHUNK_SIZE + fill.localY;
-          await gameStateService.runGlobalFloodFill(gameId, globalX, globalY);
+          await gameStateService.runGlobalFloodFill(gameId, globalX, globalY, socket.id);
         }
       }
 
@@ -140,13 +145,15 @@ export function registerSocketHandlers(
         if (!gameStateService.gameExists(gameId)) throw new Error(`Game not found: ${gameId}`);
         const chunkManager = gameStateService.getChunkManager(gameId);
         const chunk = chunkManager.getChunk(chunkX, chunkY);
+        await gameStateService.applyPersistedChunkState(gameId, chunkX, chunkY);
         socket.join(`${gameId}_chunk_${chunkX}_${chunkY}`);
         const chunkId = `${chunkX}_${chunkY}`;
         const fills = chunkManager.pendingFills.get(chunkId) ?? [];
         if (fills.length > 0) {
           chunkManager.pendingFills.delete(chunkId);
+          try { await getPendingFillsRepository().delete(gameId, chunkId); } catch {}
           for (const fill of fills) {
-            await gameStateService.runGlobalFloodFill(gameId, chunkX * CHUNK_SIZE + fill.localX, chunkY * CHUNK_SIZE + fill.localY);
+            await gameStateService.runGlobalFloodFill(gameId, chunkX * CHUNK_SIZE + fill.localX, chunkY * CHUNK_SIZE + fill.localY, socket.id);
           }
         }
         results.push({

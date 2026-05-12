@@ -33,7 +33,7 @@ export interface IChunk {
   // Methods
   getTile(localX: number, localY: number): Cell | undefined;
   setTile(localX: number, localY: number, cell: Cell): void;
-  executeLocalFloodFill(startX: number, startY: number, originalMineCountHint: number | undefined, boardManager: IChunkManager, visited: Set<string>): Promise<FloodFillResult>;
+  executeLocalFloodFill(startX: number, startY: number, originalMineCountHint: number | undefined, boardManager: IChunkManager, visited?: Set<string>): Promise<FloodFillResult>;
 }
 
 export interface IChunkManager {
@@ -44,7 +44,7 @@ export interface IChunkManager {
   convertChunkLocalToGlobalCoordinates(chunkX: number, chunkY: number, localX: number, localY: number): Coordinate;
   getChunkId(chunkX: number, chunkY: number): string;
   revealAndPropagate(x: number, y: number, originalMineCountHint?: number): Promise<Cell[]>;
-  processPendingFillsForChunk(chunkId: string, visited: Set<string>): Promise<void>;
+  processPendingFillsForChunk(chunkId: string, visited?: Set<string>): Promise<void>;
   drainSubscribedPendingFills(): Promise<void>;
   readonly pendingFills: Map<string, PendingFillItem[]>;
   readonly chunks: Map<string, IChunk>;

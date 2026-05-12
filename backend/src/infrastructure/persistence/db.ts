@@ -1,7 +1,9 @@
 // backend/src/db.ts
 import { MongoClient, Db, Collection } from 'mongodb';
-// Import PointData, LeaderboardCategory, LeaderboardMetric, LeaderboardEntry from domain/types
-import { GameConfig, Player, Players, ScoringConfig, GameRepository, GameState, Cell, PointData, LeaderboardCategory, LeaderboardMetric, LeaderboardEntry } from '../../domain/types'; 
+import { GameConfig, Player, Players, ScoringConfig, GameRepository, GameState, Cell, PointData, LeaderboardCategory, LeaderboardMetric, LeaderboardEntry } from '../../domain/types';
+import { GameRepository as NewGameRepository, GameDocument as NewGameDocument } from './gameRepository';
+import { ChunkRepository, ChunkDocument } from './chunkRepository';
+import { PendingFillsRepository, PendingFillDocument } from './pendingFillsRepository';
 
 // Define interfaces for DB documents
 export interface GameDocument {
@@ -55,6 +57,11 @@ let playersCollection: Collection<PlayerDocument>;
 let boardChunksCollection: Collection<BoardChunkDocument>;
 let leaderboardsCollection: Collection<LeaderboardDocument>;
 
+// New repositories
+let gameRepository: NewGameRepository;
+let chunkRepository: ChunkRepository;
+let pendingFillsRepository: PendingFillsRepository;
+
 export async function connectToDatabase(): Promise<void> {
     if (db) {
         console.log('Already connected to MongoDB.');
@@ -73,24 +80,31 @@ export async function connectToDatabase(): Promise<void> {
         boardChunksCollection = db.collection<BoardChunkDocument>('boardChunks');
         leaderboardsCollection = db.collection<LeaderboardDocument>('leaderboards');
 
+        // New typed collections
+        const newGamesCol = db.collection<NewGameDocument>('games');
+        const chunksCol = db.collection<ChunkDocument>('chunks');
+        const pendingFillsCol = db.collection<PendingFillDocument>('pendingFills');
+
+        gameRepository = new NewGameRepository(newGamesCol);
+        chunkRepository = new ChunkRepository(chunksCol);
+        pendingFillsRepository = new PendingFillsRepository(pendingFillsCol);
+
         // --- Create Indexes ---
-        // Index for finding games by ID
         await gamesCollection.createIndex({ _id: 1 });
-
-        // Index for finding players by ID
         await playersCollection.createIndex({ _id: 1 });
-        // Index for finding players belonging to a specific game
         await playersCollection.createIndex({ gameId: 1 });
-
-        // Compound unique index for board chunks to enable upserts and fast lookups
         await boardChunksCollection.createIndex({ gameId: 1, chunkX: 1, chunkY: 1 }, { unique: true });
-        // Index potentially useful for cleanup tasks (e.g., finding old chunks)
         await boardChunksCollection.createIndex({ updatedAt: 1 });
+        await leaderboardsCollection.createIndex({ _id: 1 });
+        await leaderboardsCollection.createIndex({ category: 1, metric: 1 });
+        await leaderboardsCollection.createIndex({ updatedAt: 1 });
 
-        // Indexes for leaderboards
-        await leaderboardsCollection.createIndex({ _id: 1 }); // Primary key index
-        await leaderboardsCollection.createIndex({ category: 1, metric: 1 }); // For querying by category and metric
-        await leaderboardsCollection.createIndex({ updatedAt: 1 }); // For time-based operations (daily/weekly boards)
+        // Chunks: 2D spatial index + recent activity index
+        await chunksCol.createIndex({ gameId: 1, loc: '2d' });
+        await chunksCol.createIndex({ gameId: 1, updatedAt: -1 });
+
+        // PendingFills: game lookup
+        await pendingFillsCol.createIndex({ gameId: 1 });
 
         console.log(`Successfully connected to database: ${db.databaseName}`);
     } catch (error) {
@@ -127,6 +141,21 @@ export function getBoardChunksCollection(): Collection<BoardChunkDocument> {
 export function getLeaderboardsCollection(): Collection<LeaderboardDocument> {
     if (!leaderboardsCollection) throw new Error("Database not connected or leaderboards collection not initialized.");
     return leaderboardsCollection;
+}
+
+export function getGameRepository(): NewGameRepository {
+    if (!gameRepository) throw new Error('Database not connected');
+    return gameRepository;
+}
+
+export function getChunkRepository(): ChunkRepository {
+    if (!chunkRepository) throw new Error('Database not connected');
+    return chunkRepository;
+}
+
+export function getPendingFillsRepository(): PendingFillsRepository {
+    if (!pendingFillsRepository) throw new Error('Database not connected');
+    return pendingFillsRepository;
 }
 
 // --- MongoDB Implementation of GameRepository ---

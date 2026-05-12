@@ -13,7 +13,9 @@ import { GameUpdateService } from './gameUpdateService';
 import { ScoreService } from './scoreService';
 import { PlayerStatus, Cell, GameState, Player } from '../domain/types';
 import * as gridLogic from '../domain/gridLogic';
-import { generateBoardTextRepresentation } from '../utils'; // Added import
+import { generateBoardTextRepresentation } from '../utils';
+import { getChunkRepository } from '../infrastructure/persistence/db';
+import { CHUNK_SIZE } from '../types/chunkTypes';
 
 export class PlayerActionService {
     constructor(
@@ -149,8 +151,7 @@ export class PlayerActionService {
                 return;
             }
 
-            // If not a mine, proceed with flood fill using the new global method
-            const { revealedCells, pendingFills } = await this.gameStateService.runGlobalFloodFill(gameId, x, y);
+            const { revealedCells, pendingFills } = await this.gameStateService.runGlobalFloodFill(gameId, x, y, socketId);
 
             console.log(`Player ${socketId} initiated reveal at (${x},${y}). Global flood fill revealed ${revealedCells.length} cells. Pending fills for chunks: ${Array.from(pendingFills).join(', ')}`);
 
@@ -199,8 +200,20 @@ export class PlayerActionService {
                 return;
             }
 
-            // Persist the updated cell state
+            // Persist the updated cell state (in-memory + MongoDB)
             this.gameStateService.updateGridCell(gameId, updatedCell);
+            try {
+                const chunkRepo = getChunkRepository();
+                const chunkX = Math.floor(updatedCell.x / CHUNK_SIZE);
+                const chunkY = Math.floor(updatedCell.y / CHUNK_SIZE);
+                const localX = ((updatedCell.x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+                const localY = ((updatedCell.y % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+                await chunkRepo.ensure(gameId, chunkX, chunkY);
+                const playerIndex = await chunkRepo.getOrAddPlayerIndex(gameId, chunkX, chunkY, socketId);
+                await chunkRepo.setFlagged(gameId, chunkX, chunkY, localX, localY, playerIndex, updatedCell.flagged);
+            } catch (err) {
+                console.error('[handleFlagTile] Failed to persist flag state:', err);
+            }
 
             // Update score via ScoreService (handles score calculation and update notification)
             this.scoreService.handleFlagToggle(gameId, socketId, updatedCell.flagged);
