@@ -1,8 +1,8 @@
 # Minesweeper Infinite TODO
 
-## Session 36: Player Sessions & Navigation
+## Player Sessions & Navigation (parked)
 
-Full spec in [`prompts/SESSION_36_Player_Sessions_Navigation.md`](./prompts/SESSION_36_Player_Sessions_Navigation.md). Prerequisite: Session 35 MongoDB persistence (done).
+Prerequisite: Session 35 MongoDB persistence (done).
 
 - [ ] **Player session tracking** — `sessions` collection with TTL index (60s), updated via `updateViewport` socket event (debounced ~500ms on client), deleted on disconnect
 - [ ] **"Where is everyone?"** — `getActivePlayers` socket event returns `{ playerId, x, y }[]` for sessions active in last 30s; client renders minimap dots
