@@ -126,5 +126,12 @@ dist
 # Docker specific
 docker-compose.override.yml
 
-# Local env files
-.venv.backend-image
+# Makefile build sentinel (tracks whether the backend test image is up to date)
+.backend-image
+
+# Build output
+backend/dist/
+frontend/dist/
+
+# Integration test reports
+reports/
