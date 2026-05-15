@@ -6,6 +6,7 @@ interface UseViewportProps {
   initialWidth?: number;
   initialHeight?: number;
   initialScale?: number;
+  cellSizePx?: number;
   onViewportChange?: (viewport: ViewportState) => void;
 }
 
@@ -20,6 +21,7 @@ interface UseViewportReturn {
   handleKeyboardPan: (direction: 'up' | 'down' | 'left' | 'right') => void;
   setCenterPosition: (x: number, y: number) => void;
   setScale: (scale: number) => void;
+  resizeTo: (width: number, height: number) => void;
 }
 
 /**
@@ -30,6 +32,7 @@ export function useViewport({
   initialWidth = 20,
   initialHeight = 15,
   initialScale = 1,
+  cellSizePx = 30,
   onViewportChange
 }: UseViewportProps = {}): UseViewportReturn {
   // Main viewport state
@@ -47,10 +50,7 @@ export function useViewport({
   // Use a ref to store the previous center position to avoid unnecessary updates
   const prevCenterRef = useRef<Coordinates>(initialCenter);
   
-  // Keyboard pan amount in cells (adjust as needed)
   const KEYBOARD_PAN_AMOUNT = 3;
-  // Pixels per cell for pan calculations
-  const CELL_SIZE = 30;
 
   // Update the viewport state
   const updateViewport = useCallback((newViewport: Partial<ViewportState>) => {
@@ -87,6 +87,10 @@ export function useViewport({
       prevCenterRef.current = { x, y };
     }
   }, [updateViewport, viewport.center.x, viewport.center.y]);
+
+  const resizeTo = useCallback((width: number, height: number) => {
+    updateViewport({ width, height });
+  }, [updateViewport]);
 
   // Change scale level
   const setScale = useCallback((scale: number) => {
@@ -153,8 +157,8 @@ export function useViewport({
       const deltaY = panStart.y - clientY;
       
       // Convert pixel movement to cell movement based on cell size
-      const cellDeltaX = Math.round(deltaX / CELL_SIZE);
-      const cellDeltaY = Math.round(deltaY / CELL_SIZE);
+      const cellDeltaX = Math.round(deltaX / cellSizePx);
+      const cellDeltaY = Math.round(deltaY / cellSizePx);
       
       // Check if we've moved at least 1 cell before updating
       if (cellDeltaX !== 0 || cellDeltaY !== 0) {
@@ -167,7 +171,7 @@ export function useViewport({
         });
       }
     }
-  }, [isPanning, panStart, updateViewport, CELL_SIZE]);
+  }, [isPanning, panStart, updateViewport, cellSizePx]);
 
   // End panning - Make sure to finalize any pending viewport update
   const handlePanEnd = useCallback(() => {
@@ -265,6 +269,7 @@ export function useViewport({
     handlePanEnd,
     handleKeyboardPan,
     setCenterPosition,
-    setScale
+    setScale,
+    resizeTo,
   };
 }

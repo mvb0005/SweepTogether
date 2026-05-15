@@ -2,7 +2,7 @@ import { Cell } from '../domain/types';
 
 export type ChunkConfig =
   | { type: 'noise' }
-  | { type: 'custom'; mines: Uint8Array }; // 256-byte: 1=mine, 0=open
+  | { type: 'custom'; mines: Uint8Array }; // CHUNK_SIZE²-byte: 0xFF=mine, 0–8=adjacentMines
 
 export type ChunkPersistenceLoader = (
   chunkX: number,
@@ -18,7 +18,7 @@ export interface Coordinate {
   y: number;
 }
 
-export const CHUNK_SIZE = 16; // Default chunk size
+export const CHUNK_SIZE = 32;
 
 export enum ChunkState {
   UNLOADED = 'UNLOADED', // Not yet loaded or generated

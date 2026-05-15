@@ -34,7 +34,7 @@ const MONGO_URL  = process.env.MONGO_URL  ?? 'mongodb://mongo_user:mongo_passwor
 const DB_NAME    = process.env.DB_NAME    ?? 'minesweeper_infinite';
 const GAME_ID    = process.env.GAME_ID    ?? 'default';
 const WORLD_SEED = process.env.WORLD_SEED ?? GAME_ID;
-const CHUNK_SIZE = 16;
+const CHUNK_SIZE = 32;
 
 // Maze dimensions and top-left chunk coordinate
 const MAZE_COLS  = 7;

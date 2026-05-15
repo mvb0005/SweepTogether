@@ -21,7 +21,7 @@ const MONGO_URL  = process.env.MONGO_URL  ?? 'mongodb://mongo_user:mongo_passwor
 const DB_NAME    = process.env.DB_NAME    ?? 'minesweeper_infinite';
 const GAME_ID    = process.env.GAME_ID    ?? 'default';
 const WORLD_SEED = process.env.WORLD_SEED ?? GAME_ID;
-const CS         = 16; // chunk size in cells
+const CS         = 32; // chunk size in cells
 
 // ---------------------------------------------------------------------------
 // Font  (5w × 7h).  'X' = mine pixel  '.' = background pixel
@@ -29,16 +29,105 @@ const CS         = 16; // chunk size in cells
 
 const LW = 5, LH = 7;
 
+// Full 5×7 dot-matrix font — all 95 printable ASCII (U+0020–U+007E).
+// Bitmaps from https://github.com/dse/dot-matrix-fonts (SIL OFL 1.1).
+// X = mine pixel, . = empty.
 const FONT: Record<string, string[]> = {
-  S: ['.XXX.', 'X....', 'X....', '.XXX.', '....X', '....X', '.XXX.'],
-  W: ['X...X', 'X...X', 'X.X.X', 'X.X.X', 'X.X.X', '.X.X.', '.X.X.'],
-  E: ['XXXXX', 'X....', 'X....', 'XXXX.', 'X....', 'X....', 'XXXXX'],
-  P: ['XXXX.', 'X...X', 'X...X', 'XXXX.', 'X....', 'X....', 'X....'],
-  T: ['XXXXX', '..X..', '..X..', '..X..', '..X..', '..X..', '..X..'],
-  O: ['.XXX.', 'X...X', 'X...X', 'X...X', 'X...X', 'X...X', '.XXX.'],
-  G: ['.XXX.', 'X....', 'X....', 'X..XX', 'X...X', 'X...X', '.XXX.'],
-  H: ['X...X', 'X...X', 'X...X', 'XXXXX', 'X...X', 'X...X', 'X...X'],
-  R: ['XXXX.', 'X...X', 'X...X', 'XXXX.', 'X.X..', 'X..X.', 'X...X'],
+  ' ': ['.....', '.....', '.....', '.....', '.....', '.....', '.....'],
+  '!': ['..X..', '..X..', '..X..', '..X..', '.....', '.....', '..X..'],
+  '"': ['.X.X.', '.X.X.', '.X.X.', '.....', '.....', '.....', '.....'],
+  '#': ['.X.X.', '.X.X.', 'XXXXX', '.X.X.', 'XXXXX', '.X.X.', '.X.X.'],
+  '$': ['..X..', '.XXXX', 'X.X..', '.XXX.', '..X.X', 'XXXX.', '..X..'],
+  '%': ['XX...', 'XX..X', '...X.', '..X..', '.X...', 'X..XX', '...XX'],
+  '&': ['.X...', 'X.X..', 'X.X..', '.X...', 'X.X.X', 'X..X.', '.XX.X'],
+  "'": ['.XX..', '..X..', '.X...', '.....', '.....', '.....', '.....'],
+  '(': ['...X.', '..X..', '.X...', '.X...', '.X...', '..X..', '...X.'],
+  ')': ['.X...', '..X..', '...X.', '...X.', '...X.', '..X..', '.X...'],
+  '*': ['.....', '..X..', 'X.X.X', '.XXX.', 'X.X.X', '..X..', '.....'],
+  '+': ['.....', '..X..', '..X..', 'XXXXX', '..X..', '..X..', '.....'],
+  ',': ['.....', '.....', '.....', '.....', '.XX..', '..X..', '.X...'],
+  '-': ['.....', '.....', '.....', 'XXXXX', '.....', '.....', '.....'],
+  '.': ['.....', '.....', '.....', '.....', '.....', '.XX..', '.XX..'],
+  '/': ['.....', '....X', '...X.', '..X..', '.X...', 'X....', '.....'],
+  '0': ['.XXX.', 'X...X', 'X..XX', 'X.X.X', 'XX..X', 'X...X', '.XXX.'],
+  '1': ['..X..', '.XX..', '..X..', '..X..', '..X..', '..X..', '.XXX.'],
+  '2': ['.XXX.', 'X...X', '....X', '...X.', '..X..', '.X...', 'XXXXX'],
+  '3': ['XXXXX', '...X.', '..X..', '...X.', '....X', 'X...X', '.XXX.'],
+  '4': ['...X.', '..XX.', '.X.X.', 'X..X.', 'XXXXX', '...X.', '...X.'],
+  '5': ['XXXXX', 'X....', 'XXXX.', '....X', '....X', 'X...X', '.XXX.'],
+  '6': ['..XX.', '.X...', 'X....', 'XXXX.', 'X...X', 'X...X', '.XXX.'],
+  '7': ['XXXXX', '....X', '...X.', '..X..', '.X...', '.X...', '.X...'],
+  '8': ['.XXX.', 'X...X', 'X...X', '.XXX.', 'X...X', 'X...X', '.XXX.'],
+  '9': ['.XXX.', 'X...X', 'X...X', '.XXXX', '....X', '...X.', '.XX..'],
+  ':': ['.....', '.XX..', '.XX..', '.....', '.XX..', '.XX..', '.....'],
+  ';': ['.....', '.XX..', '.XX..', '.....', '.XX..', '..X..', '.X...'],
+  '<': ['...X.', '..X..', '.X...', 'X....', '.X...', '..X..', '...X.'],
+  '=': ['.....', '.....', 'XXXXX', '.....', 'XXXXX', '.....', '.....'],
+  '>': ['.X...', '..X..', '...X.', '....X', '...X.', '..X..', '.X...'],
+  '?': ['.XXX.', 'X...X', '....X', '...X.', '..X..', '.....', '..X..'],
+  '@': ['.XXX.', 'X...X', '....X', '.XX.X', 'X.X.X', 'X.X.X', '.XXX.'],
+  'A': ['..X..', '.X.X.', 'X...X', 'X...X', 'XXXXX', 'X...X', 'X...X'],
+  'B': ['XXXX.', 'X...X', 'X...X', 'XXXX.', 'X...X', 'X...X', 'XXXX.'],
+  'C': ['.XXX.', 'X...X', 'X....', 'X....', 'X....', 'X...X', '.XXX.'],
+  'D': ['XXX..', 'X..X.', 'X...X', 'X...X', 'X...X', 'X..X.', 'XXX..'],
+  'E': ['XXXXX', 'X....', 'X....', 'XXXX.', 'X....', 'X....', 'XXXXX'],
+  'F': ['XXXXX', 'X....', 'X....', 'XXXX.', 'X....', 'X....', 'X....'],
+  'G': ['.XXX.', 'X...X', 'X....', 'X.XXX', 'X...X', 'X...X', '.XXXX'],
+  'H': ['X...X', 'X...X', 'X...X', 'XXXXX', 'X...X', 'X...X', 'X...X'],
+  'I': ['.XXX.', '..X..', '..X..', '..X..', '..X..', '..X..', '.XXX.'],
+  'J': ['..XXX', '...X.', '...X.', '...X.', '...X.', 'X..X.', '.XX..'],
+  'K': ['X...X', 'X..X.', 'X.X..', 'XX...', 'X.X..', 'X..X.', 'X...X'],
+  'L': ['X....', 'X....', 'X....', 'X....', 'X....', 'X....', 'XXXXX'],
+  'M': ['X...X', 'XX.XX', 'X.X.X', 'X.X.X', 'X...X', 'X...X', 'X...X'],
+  'N': ['X...X', 'X...X', 'XX..X', 'X.X.X', 'X..XX', 'X...X', 'X...X'],
+  'O': ['.XXX.', 'X...X', 'X...X', 'X...X', 'X...X', 'X...X', '.XXX.'],
+  'P': ['XXXX.', 'X...X', 'X...X', 'XXXX.', 'X....', 'X....', 'X....'],
+  'Q': ['.XXX.', 'X...X', 'X...X', 'X...X', 'X.X.X', 'X..X.', '.XX.X'],
+  'R': ['XXXX.', 'X...X', 'X...X', 'XXXX.', 'X.X..', 'X..X.', 'X...X'],
+  'S': ['.XXX.', 'X...X', 'X....', '.XXX.', '....X', 'X...X', '.XXX.'],
+  'T': ['XXXXX', '..X..', '..X..', '..X..', '..X..', '..X..', '..X..'],
+  'U': ['X...X', 'X...X', 'X...X', 'X...X', 'X...X', 'X...X', '.XXX.'],
+  'V': ['X...X', 'X...X', 'X...X', 'X...X', 'X...X', '.X.X.', '..X..'],
+  'W': ['X...X', 'X...X', 'X...X', 'X.X.X', 'X.X.X', 'X.X.X', '.X.X.'],
+  'X': ['X...X', 'X...X', '.X.X.', '..X..', '.X.X.', 'X...X', 'X...X'],
+  'Y': ['X...X', 'X...X', 'X...X', '.X.X.', '..X..', '..X..', '..X..'],
+  'Z': ['XXXXX', '....X', '...X.', '..X..', '.X...', 'X....', 'XXXXX'],
+  '[': ['.XXX.', '.X...', '.X...', '.X...', '.X...', '.X...', '.XXX.'],
+  '\\': ['.....', 'X....', '.X...', '..X..', '...X.', '....X', '.....'],
+  ']': ['.XXX.', '...X.', '...X.', '...X.', '...X.', '...X.', '.XXX.'],
+  '^': ['..X..', '.X.X.', 'X...X', '.....', '.....', '.....', '.....'],
+  '_': ['.....', '.....', '.....', '.....', '.....', '.....', 'XXXXX'],
+  '`': ['.X...', '..X..', '...X.', '.....', '.....', '.....', '.....'],
+  'a': ['.....', '.....', '.XXX.', '....X', '.XXXX', 'X...X', '.XXXX'],
+  'b': ['X....', 'X....', 'X.XX.', 'XX..X', 'X...X', 'X...X', 'XXXX.'],
+  'c': ['.....', '.....', '.XXX.', 'X....', 'X....', 'X...X', '.XXX.'],
+  'd': ['....X', '....X', '.XX.X', 'X..XX', 'X...X', 'X...X', '.XXXX'],
+  'e': ['.....', '.....', '.XXX.', 'X...X', 'XXXXX', 'X....', '.XXX.'],
+  'f': ['..XX.', '.X..X', '.X...', 'XXX..', '.X...', '.X...', '.X...'],
+  'g': ['.....', '.....', '.XXXX', 'X...X', '.XXXX', '....X', '.XXX.'],
+  'h': ['X....', 'X....', 'X.XX.', 'XX..X', 'X...X', 'X...X', 'X...X'],
+  'i': ['..X..', '.....', '.XX..', '..X..', '..X..', '..X..', '.XXX.'],
+  'j': ['...X.', '.....', '..XX.', '...X.', '...X.', 'X..X.', '.XX..'],
+  'k': ['X....', 'X....', 'X..X.', 'X.X..', 'XX...', 'X.X..', 'X..X.'],
+  'l': ['.XX..', '..X..', '..X..', '..X..', '..X..', '..X..', '.XXX.'],
+  'm': ['.....', '.....', 'XX.X.', 'X.X.X', 'X.X.X', 'X.X.X', 'X...X'],
+  'n': ['.....', '.....', 'X.XX.', 'XX..X', 'X...X', 'X...X', 'X...X'],
+  'o': ['.....', '.....', '.XXX.', 'X...X', 'X...X', 'X...X', '.XXX.'],
+  'p': ['.....', '.....', 'XXXX.', 'X...X', 'XXXX.', 'X....', 'X....'],
+  'q': ['.....', '.....', '.XXXX', 'X...X', '.XXXX', '....X', '....X'],
+  'r': ['.....', '.....', 'X.XX.', 'XX..X', 'X....', 'X....', 'X....'],
+  's': ['.....', '.....', '.XXX.', 'X....', '.XXX.', '....X', 'XXXX.'],
+  't': ['.X...', '.X...', 'XXX..', '.X...', '.X...', '.X..X', '..XX.'],
+  'u': ['.....', '.....', 'X...X', 'X...X', 'X...X', 'X..XX', '.XX.X'],
+  'v': ['.....', '.....', 'X...X', 'X...X', 'X...X', '.X.X.', '..X..'],
+  'w': ['.....', '.....', 'X...X', 'X...X', 'X.X.X', 'X.X.X', '.X.X.'],
+  'x': ['.....', '.....', 'X...X', '.X.X.', '..X..', '.X.X.', 'X...X'],
+  'y': ['.....', '.....', 'X...X', 'X...X', '.XXXX', '....X', '.XXX.'],
+  'z': ['.....', '.....', 'XXXXX', '...X.', '..X..', '.X...', 'XXXXX'],
+  '{': ['...X.', '..X..', '..X..', '.X...', '..X..', '..X..', '...X.'],
+  '|': ['..X..', '..X..', '..X..', '..X..', '..X..', '..X..', '..X..'],
+  '}': ['.X...', '..X..', '..X..', '...X.', '..X..', '..X..', '.X...'],
+  '~': ['.....', '.....', '.....', '.XX.X', 'X..X.', '.....', '.....'],
 };
 
 const TEXT = 'SWEEPTOGETHER';
@@ -47,7 +136,7 @@ const TEXT = 'SWEEPTOGETHER';
 // Geometry
 // ---------------------------------------------------------------------------
 
-const S           = 16; // cells per font-pixel step — sets letter size
+const S           = 4;  // cells per font-pixel step — sets letter size
 const LETTER_GAP  = 2 * S; // cell gap between letters
 
 const LETTER_CELL_W = (LW - 1) * S;  // 64 cells wide per letter
@@ -56,18 +145,17 @@ const LETTER_CELL_H = (LH - 1) * S;  // 96 cells tall per letter
 // Total text span in cells
 const TEXT_CELL_W = TEXT.length * LETTER_CELL_W + (TEXT.length - 1) * LETTER_GAP;
 
-// Chunk region (text + PAD chunk padding on all sides)
-const PAD_CHUNKS  = 2;
-const PAD_CELLS   = PAD_CHUNKS * CS;
-const REGION_W    = Math.ceil(TEXT_CELL_W / CS) + 2 * PAD_CHUNKS;   // chunks
-const REGION_H    = Math.ceil(LETTER_CELL_H / CS) + 2 * PAD_CHUNKS; // chunks
+// Minimum chunks to contain the text with at least 1-cell clearance from every outer face.
+// +2 ensures one cell of margin on each side even when text aligns to a chunk boundary.
+const REGION_W = Math.ceil((TEXT_CELL_W  + 2) / CS);
+const REGION_H = Math.ceil((LETTER_CELL_H + 2) / CS);
 
-const ORIG_CX = -Math.floor(REGION_W / 2); // centre around chunk 0
+const ORIG_CX = -Math.floor(REGION_W / 2);
 const ORIG_CY = -Math.floor(REGION_H / 2);
 
-// Global cell origin where first letter starts
-const TEXT_GX = ORIG_CX * CS + PAD_CELLS;
-const TEXT_GY = ORIG_CY * CS + PAD_CELLS;
+// Centre text within the region (distributes leftover chunk slack evenly).
+const TEXT_GX = ORIG_CX * CS + Math.floor((REGION_W * CS - TEXT_CELL_W)  / 2);
+const TEXT_GY = ORIG_CY * CS + Math.floor((REGION_H * CS - LETTER_CELL_H) / 2);
 
 // ---------------------------------------------------------------------------
 // Bresenham line (yields all integer cells on a line, inclusive)

@@ -22,7 +22,7 @@ const numberColors: Record<number, string> = {
 };
 
 const BoardSVG: React.FC<BoardSVGProps> = ({ chunks, chunkSize }) => {
-  const { viewport, onPanStart, onPanMove, onPanEnd } = useViewportContext();
+  const { viewport, onPanStart, onPanMove, onPanEnd, onZoom } = useViewportContext();
   const { isPlayerLocked, onRevealCell, onFlagCell, onChordCell } = useGameContext();
 
   const draggingRef = useRef(false);
@@ -70,6 +70,11 @@ const BoardSVG: React.FC<BoardSVGProps> = ({ chunks, chunkSize }) => {
       }}
       onMouseUp={() => onPanEnd()}
       onMouseLeave={() => onPanEnd()}
+      onWheel={e => {
+        e.preventDefault();
+        const delta = Math.max(-0.3, Math.min(0.3, -e.deltaY * 0.002));
+        onZoom(delta);
+      }}
     >
       {Object.values(chunks).map(chunk => {
         const chunkOffsetX = chunk.coords.x * chunkSize;

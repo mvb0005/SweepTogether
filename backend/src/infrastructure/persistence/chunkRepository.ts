@@ -8,7 +8,7 @@ function toBuffer(val: Buffer | Binary): Buffer {
   return (val as Binary).buffer as unknown as Buffer;
 }
 
-const CELLS_PER_CHUNK = CHUNK_SIZE * CHUNK_SIZE; // 256
+const CELLS_PER_CHUNK = CHUNK_SIZE * CHUNK_SIZE;
 
 export interface ChunkDocument {
   _id: string;           // "gameId_chunkX_chunkY"
@@ -18,9 +18,9 @@ export interface ChunkDocument {
   version: number;
   /** chunk-local player IDs; index into this array is what revealed/flagged buffers store */
   players: string[];
-  /** 256-byte buffer: -1 (0xFF) = unrevealed, 0..63 = playerIndex who revealed */
+  /** CELLS_PER_CHUNK-byte buffer: -1 (0xFF) = unrevealed, 0..63 = playerIndex who revealed */
   revealed: Buffer;
-  /** 256-byte buffer: -1 (0xFF) = unflagged, 0..63 = playerIndex who flagged */
+  /** CELLS_PER_CHUNK-byte buffer: -1 (0xFF) = unflagged, 0..63 = playerIndex who flagged */
   flagged: Buffer;
   loc: [number, number];
   updatedAt: Date;

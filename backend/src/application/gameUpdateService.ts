@@ -14,8 +14,7 @@ import {
     TilesUpdatePayload,
 } from '../domain/types';
 import { GameStateService } from './gameStateService';
-
-const CHUNK_SIZE = 16;
+import { CHUNK_SIZE } from '../types/chunkTypes';
 
 export class GameUpdateService {
     constructor(

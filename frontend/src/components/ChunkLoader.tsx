@@ -1,12 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSocket } from '../hooks/useSocket';
 import { useViewportContext } from '../contexts/ViewportContext';
 import { useGameContext } from '../contexts/GameContext';
-import BoardSVG from './BoardSVG';
-import { ChunkMap, Coordinates } from '../types';
+import CanvasBoard from './CanvasBoard';
+import { Chunk, ChunkMap, Coordinates } from '../types';
 
-const CHUNK_SIZE = 16;
-const BUFFER_DEBOUNCE_MS = 200;
+const CHUNK_SIZE = 32;
+const BUFFER_DEBOUNCE_MS = 300;
 
 const ChunkLoader: React.FC = () => {
   const { socket, isConnected } = useSocket();
@@ -17,6 +17,30 @@ const ChunkLoader: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const subscribedRef = useRef<Set<string>>(new Set());
   const [debouncedBuffered, setDebouncedBuffered] = useState<Coordinates[]>(bufferedChunks);
+
+  // Pending live updates from chunkData events — flushed once per rAF.
+  const pendingLiveRef = useRef<Map<string, Chunk>>(new Map());
+  const liveRafRef = useRef<number | null>(null);
+
+  const flushLiveUpdates = useCallback(() => {
+    const pending = pendingLiveRef.current;
+    if (pending.size === 0) return;
+    pendingLiveRef.current = new Map();
+    setChunks(prev => {
+      const next = { ...prev };
+      pending.forEach((chunk, key) => { next[key] = chunk; });
+      return next;
+    });
+    setIsLoading(false);
+  }, []);
+
+  const scheduleLiveFlush = useCallback(() => {
+    if (liveRafRef.current !== null) return;
+    liveRafRef.current = requestAnimationFrame(() => {
+      liveRafRef.current = null;
+      flushLiveUpdates();
+    });
+  }, [flushLiveUpdates]);
 
   // Debounce buffer chunks only — visible chunks are handled immediately below.
   useEffect(() => {
@@ -29,7 +53,7 @@ const ChunkLoader: React.FC = () => {
   useEffect(() => {
     if (!socket || !isConnected) return;
 
-    const parseChunk = (data: any) => ({
+    const parseChunk = (data: any): Chunk => ({
       coords: { x: data.chunkX, y: data.chunkY },
       cells: data.tiles.map((row: any[]) =>
         row.map(cell => ({
@@ -42,13 +66,13 @@ const ChunkLoader: React.FC = () => {
       ),
     });
 
-    // Live updates from gameplay (single chunk, broadcast to room).
+    // Live per-chunk update — batch via rAF.
     const handleChunkData = (data: any) => {
-      setChunks(prev => ({ ...prev, [`${data.chunkX}_${data.chunkY}`]: parseChunk(data) }));
-      setIsLoading(false);
+      pendingLiveRef.current.set(`${data.chunkX}_${data.chunkY}`, parseChunk(data));
+      scheduleLiveFlush();
     };
 
-    // Bulk initial response from subscribeToChunks (all chunks in one update).
+    // Bulk initial response — single state update.
     const handleChunksData = (dataArray: any[]) => {
       setChunks(prev => {
         const next = { ...prev };
@@ -73,10 +97,10 @@ const ChunkLoader: React.FC = () => {
       socket.off('chunksData', handleChunksData);
       socket.off('error', handleError);
     };
-  }, [socket, isConnected]);
+  }, [socket, isConnected, scheduleLiveFlush]);
 
-  // Helper: subscribe a batch of new chunks, unsubscribe any that left the target set.
-  const syncSubscriptions = (targetKeys: Set<string>, targetChunks: Coordinates[]) => {
+  // Helper: subscribe new chunks, unsubscribe departed ones.
+  const syncSubscriptions = useCallback((targetKeys: Set<string>, targetChunks: Coordinates[]) => {
     if (!socket || !gameId) return;
 
     const toSubscribe = targetChunks.filter(c => !subscribedRef.current.has(`${c.x}_${c.y}`));
@@ -88,19 +112,16 @@ const ChunkLoader: React.FC = () => {
       toSubscribe.forEach(c => subscribedRef.current.add(`${c.x}_${c.y}`));
     }
 
+    // Unsubscribe departed chunks from the socket but keep them in render state
+    // so returning to an area shows cached data instead of a void flash.
     for (const key of Array.from(subscribedRef.current)) {
       if (!targetKeys.has(key)) {
         const [x, y] = key.split('_').map(Number);
         socket.emit('unsubscribeFromChunk', { gameId, chunkX: x, chunkY: y });
         subscribedRef.current.delete(key);
-        setChunks(prev => {
-          const next = { ...prev };
-          delete next[key];
-          return next;
-        });
       }
     }
-  };
+  }, [socket, gameId]);
 
   // Immediately subscribe to exactly-visible chunks.
   useEffect(() => {
@@ -137,7 +158,7 @@ const ChunkLoader: React.FC = () => {
 
   return (
     <div style={{ width: '100%', height: '100%' }}>
-      <BoardSVG chunks={chunks} chunkSize={CHUNK_SIZE} />
+      <CanvasBoard chunks={chunks} chunkSize={CHUNK_SIZE} />
     </div>
   );
 };
