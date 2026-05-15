@@ -1,6 +1,6 @@
 BACKEND_TEST_IMAGE := sweeptogether-backend-test
 
-.PHONY: test test-watch test-coverage up down
+.PHONY: test test-watch test-coverage up down pregen pregen-text
 
 # Build the backend test image. Cached after first run unless package.json changes.
 .backend-image:
@@ -37,6 +37,17 @@ pregen: .backend-image
 		-e GAME_ID="default" \
 		$(BACKEND_TEST_IMAGE) \
 		node_modules/.bin/ts-node tools/pregen-chunks.ts
+
+pregen-text: .backend-image
+	docker run --rm \
+		-v "$(PWD)/backend/src:/usr/src/app/src" \
+		-v "$(PWD)/tools:/usr/src/app/tools" \
+		--network sweeptogether_minesweeper-net \
+		-e MONGO_URL="mongodb://mongo_user:mongo_password@mongo:27017/?authSource=admin" \
+		-e DB_NAME="minesweeper_infinite" \
+		-e GAME_ID="default" \
+		$(BACKEND_TEST_IMAGE) \
+		node_modules/.bin/ts-node tools/pregen-text.ts
 
 up:
 	docker-compose up --build

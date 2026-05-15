@@ -1,4 +1,4 @@
-import { IChunkManager, IChunk, Coordinate, CHUNK_SIZE, PendingFillItem } from '../types/chunkTypes';
+import { IChunkManager, IChunk, Coordinate, CHUNK_SIZE, PendingFillItem, ChunkPersistenceLoader } from '../types/chunkTypes';
 import { Chunk } from './Chunk';
 import { Cell, Coordinates } from './types'; // Assuming Cell is in domain/types.ts
 
@@ -11,6 +11,7 @@ export class ChunkManager implements IChunkManager {
   public gameId: string;
   public broadcastChunkUpdate: (chunk: IChunk) => void;
   public pendingFills: Map<string, PendingFillItem[]> = new Map();
+  private persistenceLoader?: ChunkPersistenceLoader;
 
   constructor(
     gameId: string,
@@ -18,7 +19,8 @@ export class ChunkManager implements IChunkManager {
     worldGenerator?: (globalX: number, globalY: number) => Cell,
     hasActiveSubscribers?: (gameId: string, chunkX: number, chunkY: number) => boolean,
     processAndBroadcastChunk?: (gameId: string, chunkX: number, chunkY: number) => Promise<void>,
-    broadcastChunkUpdate?: (chunk: IChunk) => void
+    broadcastChunkUpdate?: (chunk: IChunk) => void,
+    persistenceLoader?: ChunkPersistenceLoader
   ) {
     this.chunks = new Map<string, IChunk>();
     this.chunkSize = chunkSize;
@@ -38,21 +40,70 @@ export class ChunkManager implements IChunkManager {
       // Placeholder: wire this up to the socket layer to emit to the chunk's room
       // e.g., io.to(room).emit('chunkData', ...)
     });
+    this.persistenceLoader = persistenceLoader;
   }
 
   public getChunkId(chunkX: number, chunkY: number): string {
     return `${chunkX}_${chunkY}`;
   }
 
-  public getChunk(chunkX: number, chunkY: number): IChunk {
-    const chunkId = this.getChunkId(chunkX, chunkY);
-    if (!this.chunks.has(chunkId)) {
-      // console.log(`BoardManager: Creating new chunk ${chunkId}`);
-      const newChunk = new Chunk(chunkX, chunkY, this.chunkSize, this.worldGenerator, undefined, this.broadcastChunkUpdate);
-      this.chunks.set(chunkId, newChunk);
-      return newChunk;
+  private buildChunkFromData(
+    chunkX: number,
+    chunkY: number,
+    mines?: Uint8Array,
+    revealedIndices: Set<number> = new Set(),
+    flaggedIndices: Set<number> = new Set()
+  ): IChunk {
+    const chunk = new Chunk(chunkX, chunkY, this.chunkSize, this.worldGenerator, mines, this.broadcastChunkUpdate);
+    for (const idx of revealedIndices) {
+      const lx = idx % this.chunkSize;
+      const ly = Math.floor(idx / this.chunkSize);
+      const cell = chunk.getTile(lx, ly);
+      if (cell) chunk.setTile(lx, ly, { ...cell, revealed: true });
     }
-    return this.chunks.get(chunkId)!;
+    for (const idx of flaggedIndices) {
+      const lx = idx % this.chunkSize;
+      const ly = Math.floor(idx / this.chunkSize);
+      const cell = chunk.getTile(lx, ly);
+      if (cell) chunk.setTile(lx, ly, { ...cell, flagged: true });
+    }
+    return chunk;
+  }
+
+  public async getChunk(chunkX: number, chunkY: number): Promise<IChunk> {
+    const chunkId = this.getChunkId(chunkX, chunkY);
+    if (this.chunks.has(chunkId)) return this.chunks.get(chunkId)!;
+
+    let mines: Uint8Array | undefined;
+    let revealedIndices = new Set<number>();
+    let flaggedIndices = new Set<number>();
+
+    if (this.persistenceLoader) {
+      const data = await this.persistenceLoader(chunkX, chunkY);
+      if (data) {
+        mines = data.mines;
+        revealedIndices = data.revealedIndices;
+        flaggedIndices = data.flaggedIndices;
+      }
+    }
+
+    const chunk = this.buildChunkFromData(chunkX, chunkY, mines, revealedIndices, flaggedIndices);
+    this.chunks.set(chunkId, chunk);
+    return chunk;
+  }
+
+  public async preloadMany(docs: Array<{
+    chunkX: number;
+    chunkY: number;
+    mines?: Uint8Array;
+    revealedIndices: Set<number>;
+    flaggedIndices: Set<number>;
+  }>): Promise<void> {
+    for (const { chunkX, chunkY, mines, revealedIndices, flaggedIndices } of docs) {
+      const chunkId = this.getChunkId(chunkX, chunkY);
+      if (this.chunks.has(chunkId)) continue;
+      this.chunks.set(chunkId, this.buildChunkFromData(chunkX, chunkY, mines, revealedIndices, flaggedIndices));
+    }
   }
 
   public getChunkById(chunkId: string): IChunk | undefined {
@@ -108,7 +159,7 @@ export class ChunkManager implements IChunkManager {
     const visited = new Set<string>();
 
     const { chunkCoordinate, localCoordinate } = this.convertGlobalToChunkLocalCoordinates(x, y);
-    const chunk = this.getChunk(chunkCoordinate.x, chunkCoordinate.y);
+    const chunk = await this.getChunk(chunkCoordinate.x, chunkCoordinate.y);
     const initialFill = await chunk.executeLocalFloodFill(localCoordinate.x, localCoordinate.y, originalMineCountHint, this, visited);
     const chunksWithPendingFills = Object.keys(initialFill.pendingFills);
 
@@ -123,7 +174,7 @@ export class ChunkManager implements IChunkManager {
         const [chunkX, chunkY] = chunkId.split('_').map(Number);
         if (this.hasActiveSubscribers(this.gameId, chunkX, chunkY)) {
           await this.processPendingFillsForChunk(chunkId, visited);
-          this.broadcastChunkUpdate(this.getChunk(chunkX, chunkY));
+          this.broadcastChunkUpdate(await this.getChunk(chunkX, chunkY));
           hasMore = true;
         }
       }
@@ -155,7 +206,7 @@ export class ChunkManager implements IChunkManager {
     console.log(`[ChunkManager] processPendingFillsForChunk called for chunkId=${chunkId}, numFills=${fills.length}`);
     if (fills.length === 0) return;
     const [chunkX, chunkY] = chunkId.split('_').map(Number);
-    const chunk = this.getChunk(chunkX, chunkY);
+    const chunk = await this.getChunk(chunkX, chunkY);
     for (const fill of fills) {
       console.log(`[ChunkManager] Processing fill in chunkId=${chunkId}: localX=${fill.localX}, localY=${fill.localY}`);
       const result = await chunk.executeLocalFloodFill(fill.localX, fill.localY, fill.originalMineCountHint, this, visited);

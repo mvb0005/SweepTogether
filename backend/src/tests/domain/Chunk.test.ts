@@ -6,6 +6,7 @@ import { ChunkState, CHUNK_SIZE, IChunkManager, Coordinate } from '../../types/c
 const mockChunkManager: IChunkManager = {
   getChunk: jest.fn(),
   getChunkById: jest.fn(),
+  preloadMany: jest.fn(),
   convertGlobalToChunkCoordinates: jest.fn((globalX, globalY) => ({
     x: Math.floor(globalX / CHUNK_SIZE),
     y: Math.floor(globalY / CHUNK_SIZE),

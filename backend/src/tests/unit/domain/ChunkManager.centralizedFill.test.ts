@@ -13,7 +13,7 @@ describe('ChunkManager - Centralized Pending Fill Queue', () => {
     const broadcastSpy = jest.fn();
     const chunkManager = new ChunkManager('testgame', CHUNK_SIZE, createZeroMineCellGenerator(), undefined, undefined, broadcastSpy);
     await chunkManager.revealAndPropagate(0, 0);
-    const chunk = chunkManager.getChunk(0, 0);
+    const chunk = await chunkManager.getChunk(0, 0);
     for (let y = 0; y < CHUNK_SIZE; y++) {
       for (let x = 0; x < CHUNK_SIZE; x++) {
         expect(chunk.getTile(x, y)?.revealed).toBe(true);
@@ -44,7 +44,7 @@ describe('ChunkManager - Centralized Pending Fill Queue', () => {
     await chunkManager.revealAndPropagate(CHUNK_SIZE - 1, 0);
     expect(chunkManager.pendingFills.has('1_0')).toBe(true);
     await chunkManager.processPendingFillsForChunk('1_0');
-    const neighborChunk = chunkManager.getChunk(1, 0);
+    const neighborChunk = await chunkManager.getChunk(1, 0);
     expect(neighborChunk.getTile(0, 0)?.revealed).toBe(true);
     expect(chunkManager.pendingFills.get('1_0')).toBeUndefined();
     expect(broadcastSpy).toHaveBeenCalled();
@@ -66,7 +66,7 @@ describe('ChunkManager - Centralized Pending Fill Queue', () => {
     const broadcastSpy = jest.fn();
     const chunkManager = new ChunkManager('testgame', CHUNK_SIZE, createZeroMineCellGenerator(), undefined, undefined, broadcastSpy);
     chunkManager.addPendingFill('2_0', { localX: 0, localY: 0 });
-    const chunk = chunkManager.getChunk(2, 0);
+    const chunk = await chunkManager.getChunk(2, 0);
     expect(chunk.getTile(0, 0)?.revealed).toBe(false);
     expect(chunkManager.pendingFills.get('2_0')?.length).toBe(1);
     // No broadcast expected for just adding pending fills, so we do not check broadcastSpy here
@@ -86,8 +86,8 @@ describe('ChunkManager - Centralized Pending Fill Queue', () => {
       broadcastSpy
     );
     await chunkManager.revealAndPropagate(CHUNK_SIZE - 1, 0);
-    const chunk00 = chunkManager.getChunk(0, 0);
-    const chunk10 = chunkManager.getChunk(1, 0);
+    const chunk00 = await chunkManager.getChunk(0, 0);
+    const chunk10 = await chunkManager.getChunk(1, 0);
     for (let y = 0; y < CHUNK_SIZE; y++) {
       for (let x = 0; x < CHUNK_SIZE; x++) {
         expect(chunk00.getTile(x, y)?.revealed).toBe(true);
@@ -115,9 +115,9 @@ describe('ChunkManager - Centralized Pending Fill Queue', () => {
       broadcastSpy
     );
     await chunkManager.revealAndPropagate(CHUNK_SIZE - 1, CHUNK_SIZE - 1); // bottom-right corner
-    const chunk00 = chunkManager.getChunk(0, 0);
-    const chunk10 = chunkManager.getChunk(1, 0);
-    const chunk01 = chunkManager.getChunk(0, 1);
+    const chunk00 = await chunkManager.getChunk(0, 0);
+    const chunk10 = await chunkManager.getChunk(1, 0);
+    const chunk01 = await chunkManager.getChunk(0, 1);
     for (let y = 0; y < CHUNK_SIZE; y++) {
       for (let x = 0; x < CHUNK_SIZE; x++) {
         expect(chunk00.getTile(x, y)?.revealed).toBe(true);
@@ -148,7 +148,7 @@ describe('ChunkManager - Centralized Pending Fill Queue', () => {
       broadcastSpy
     );
     await chunkManager.revealAndPropagate(CHUNK_SIZE - 1, 0);
-    const chunk00 = chunkManager.getChunk(0, 0);
+    const chunk00 = await chunkManager.getChunk(0, 0);
     for (let y = 0; y < CHUNK_SIZE; y++) {
       for (let x = 0; x < CHUNK_SIZE; x++) {
         expect(chunk00.getTile(x, y)?.revealed).toBe(true);

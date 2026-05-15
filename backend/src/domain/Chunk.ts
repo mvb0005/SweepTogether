@@ -31,10 +31,9 @@ export class Chunk implements IChunk {
         const globalX = chunkX * this.size + x;
         const globalY = chunkY * this.size + y;
         if (minesOverride !== undefined) {
-          const isMine = minesOverride[y * size + x] === 1;
-          this.tiles[y][x] = initialCellGenerator
-            ? { ...initialCellGenerator(globalX, globalY), isMine }
-            : { x: globalX, y: globalY, isMine, adjacentMines: 0, revealed: false, flagged: false };
+          const val = minesOverride[y * size + x];
+          const isMine = val === 0xFF;
+          this.tiles[y][x] = { x: globalX, y: globalY, isMine, adjacentMines: isMine ? 0 : val, revealed: false, flagged: false };
         } else if (initialCellGenerator) {
           this.tiles[y][x] = initialCellGenerator(globalX, globalY);
         } else {
@@ -104,7 +103,7 @@ export class Chunk implements IChunk {
           const neighborGlobalX = globalX + dx;
           const neighborGlobalY = globalY + dy;
           const { chunkCoordinate, localCoordinate } = boardManager.convertGlobalToChunkLocalCoordinates(neighborGlobalX, neighborGlobalY);
-          const neighborChunk = boardManager.getChunk(chunkCoordinate.x, chunkCoordinate.y);
+          const neighborChunk = await boardManager.getChunk(chunkCoordinate.x, chunkCoordinate.y);
           const neighborCell = neighborChunk.getTile(localCoordinate.x, localCoordinate.y);
           if (neighborCell && neighborCell.isMine) {
             adjacentMines++;

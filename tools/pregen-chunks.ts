@@ -24,6 +24,7 @@
 import { MongoClient } from 'mongodb';
 import { WorldGenerator } from '../src/domain/worldGenerator';
 import { ChunkRepository } from '../src/infrastructure/persistence/chunkRepository';
+import { GameRepository } from '../src/infrastructure/persistence/gameRepository';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -149,20 +150,20 @@ function makeRoomLayout(passageMask: number): ChunkLayout {
 }
 
 // ---------------------------------------------------------------------------
-// Edge blending
+// Mine layout with noise-preserved outer face
 // ---------------------------------------------------------------------------
 
 /**
- * Overwrites cells on the section's outward boundary with noise so neighbouring
- * noise-generated chunks compute correct adjacentMines at the seam.
+ * Builds the 0/1 mine layout for a single chunk.
  *
- * Unlike a naive "override every edge chunk's outer ring", this targets only
- * the single row/column of cells that actually face the outside world, leaving
- * interior-facing sides of edge chunks untouched (and therefore preserving
- * maze doorways between edge chunks and their interior neighbours).
+ * The entire row/column of cells that directly face the noise world (the
+ * outward-facing edge of edge chunks) keeps the WorldGenerator value so that
+ * neighbouring noise chunks always compute correct adjacentMines at the seam.
+ * Custom mines are never placed on those border cells.
+ * All other cells use the authored maze layout.
  */
-function blendMines(
-  col: number, row: number,          // position within maze grid
+function buildMineLayout(
+  col: number, row: number,
   chunkX: number, chunkY: number,
   authoredLayout: ChunkLayout,
   worldGen: WorldGenerator,
@@ -170,21 +171,71 @@ function blendMines(
   const mines = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
   for (let ly = 0; ly < CHUNK_SIZE; ly++) {
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-      const globalX = chunkX * CHUNK_SIZE + lx;
-      const globalY = chunkY * CHUNK_SIZE + ly;
-
-      const facesOutside =
-        (col === 0             && lx === 0)             ||
-        (col === MAZE_COLS - 1 && lx === CHUNK_SIZE - 1)||
-        (row === 0             && ly === 0)             ||
+      const isOuterFace =
+        (col === 0             && lx === 0)              ||
+        (col === MAZE_COLS - 1 && lx === CHUNK_SIZE - 1) ||
+        (row === 0             && ly === 0)              ||
         (row === MAZE_ROWS - 1 && ly === CHUNK_SIZE - 1);
 
-      mines[ly * CHUNK_SIZE + lx] = facesOutside
-        ? (worldGen.isMine(globalX, globalY) ? 1 : 0)
-        : authoredLayout[ly][lx];
+      if (isOuterFace) {
+        const globalX = chunkX * CHUNK_SIZE + lx;
+        const globalY = chunkY * CHUNK_SIZE + ly;
+        mines[ly * CHUNK_SIZE + lx] = worldGen.isMine(globalX, globalY) ? 1 : 0;
+      } else {
+        mines[ly * CHUNK_SIZE + lx] = authoredLayout[ly][lx];
+      }
     }
   }
   return mines;
+}
+
+// ---------------------------------------------------------------------------
+// Buffer encoding: 0xFF = mine, 0–8 = adjacentMines
+// ---------------------------------------------------------------------------
+
+/**
+ * Given the full grid of mine layouts (0/1), compute the final chunk buffer
+ * encoding both isMine (0xFF) and adjacentMines (0–8).
+ * Neighbors outside the maze grid are queried from WorldGenerator so that
+ * cells on the outer face of edge chunks get correct counts.
+ */
+function buildChunkBuffer(
+  allLayouts: Uint8Array[][],
+  row: number, col: number,
+  chunkX: number, chunkY: number,
+  worldGen: WorldGenerator,
+): Uint8Array {
+  const buf = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
+  for (let ly = 0; ly < CHUNK_SIZE; ly++) {
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+      const idx = ly * CHUNK_SIZE + lx;
+      if (allLayouts[row][col][idx] === 1) {
+        buf[idx] = 0xFF; // mine
+      } else {
+        let adj = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const glx = lx + dx, gly = ly + dy;
+            const nr = row + Math.floor(gly / CHUNK_SIZE);
+            const nc = col + Math.floor(glx / CHUNK_SIZE);
+            const nlx = ((glx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+            const nly = ((gly % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+            if (nr >= 0 && nr < MAZE_ROWS && nc >= 0 && nc < MAZE_COLS) {
+              if (allLayouts[nr][nc][nly * CHUNK_SIZE + nlx] === 1) adj++;
+            } else {
+              // Neighbour is in a noise chunk — ask WorldGenerator
+              const globalNX = chunkX * CHUNK_SIZE + glx;
+              const globalNY = chunkY * CHUNK_SIZE + gly;
+              if (worldGen.isMine(globalNX, globalNY)) adj++;
+            }
+          }
+        }
+        buf[idx] = adj;
+      }
+    }
+  }
+  return buf;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,27 +255,43 @@ async function main(): Promise<void> {
   try {
     const db     = client.db(DB_NAME);
     const repo   = new ChunkRepository(db.collection('chunks') as never);
+    const gameRepo = new GameRepository(db.collection('games') as never);
+
+    // Ensure the game document uses WORLD_SEED so the server's WorldGenerator matches.
+    await gameRepo.createOrLoad(GAME_ID, { rows: 0, cols: 0, mines: 0, isInfiniteWorld: true });
     const worldGen = new WorldGenerator(WORLD_SEED);
 
-    let saved = 0;
+    // First pass: build all blended mine layouts (0/1) so adjacentMines can
+    // be computed across chunk boundaries.
+    const allLayouts: Uint8Array[][] = Array.from({ length: MAZE_ROWS }, () =>
+      new Array(MAZE_COLS)
+    );
+    const allMasks: number[][] = Array.from({ length: MAZE_ROWS }, () =>
+      new Array(MAZE_COLS)
+    );
     for (let row = 0; row < MAZE_ROWS; row++) {
       for (let col = 0; col < MAZE_COLS; col++) {
-        const cx = ORIGIN_X + col;
-        const cy = ORIGIN_Y + row;
-
-        // Close passages that exit the section boundary (edge blending handles
-        // the outer ring so the doorway cells would be noise anyway)
         let mask = passages[row][col];
         if (row === 0)             mask &= ~NORTH;
         if (row === MAZE_ROWS - 1) mask &= ~SOUTH;
         if (col === 0)             mask &= ~WEST;
         if (col === MAZE_COLS - 1) mask &= ~EAST;
-
+        allMasks[row][col] = mask;
         const layout = makeRoomLayout(mask);
-        const mines  = blendMines(col, row, cx, cy, layout, worldGen);
+        allLayouts[row][col] = buildMineLayout(col, row, ORIGIN_X + col, ORIGIN_Y + row, layout, worldGen);
+      }
+    }
 
-        await repo.saveCustomChunk(GAME_ID, cx, cy, mines);
+    // Second pass: encode isMine + adjacentMines into a single buffer and save.
+    let saved = 0;
+    for (let row = 0; row < MAZE_ROWS; row++) {
+      for (let col = 0; col < MAZE_COLS; col++) {
+        const cx = ORIGIN_X + col;
+        const cy = ORIGIN_Y + row;
+        const buf = buildChunkBuffer(allLayouts, row, col, cx, cy, worldGen);
+        await repo.saveCustomChunk(GAME_ID, cx, cy, buf);
 
+        const mask = allMasks[row][col];
         const dirs: string[] = [];
         if (mask & NORTH) dirs.push('N');
         if (mask & SOUTH) dirs.push('S');

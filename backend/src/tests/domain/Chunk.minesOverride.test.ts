@@ -2,7 +2,8 @@ import { Chunk } from '../../domain/Chunk';
 import { CHUNK_SIZE, IChunkManager } from '../../types/chunkTypes';
 
 const mockChunkManager: IChunkManager = {
-  getChunk: jest.fn((chunkX: number, chunkY: number) => new Chunk(chunkX, chunkY, CHUNK_SIZE)),
+  getChunk: jest.fn((chunkX: number, chunkY: number) => Promise.resolve(new Chunk(chunkX, chunkY, CHUNK_SIZE))),
+  preloadMany: jest.fn(),
   getChunkById: jest.fn(),
   convertGlobalToChunkCoordinates: jest.fn((globalX: number, globalY: number) => ({
     x: Math.floor(globalX / CHUNK_SIZE),
@@ -39,11 +40,11 @@ describe('Chunk with minesOverride', () => {
   });
 
   it('should use minesOverride buffer to set isMine on tiles', () => {
-    // Build a 4x4 override buffer with mines at (0,0) and (3,3)
+    // Build a 4x4 override buffer with mines at (0,0) and (3,3): 0xFF=mine, 0-8=adjacentMines
     const size = 4;
-    const override = new Uint8Array(size * size); // all 0
-    override[0 * size + 0] = 1; // (localX=0, localY=0)
-    override[3 * size + 3] = 1; // (localX=3, localY=3)
+    const override = new Uint8Array(size * size); // all 0 = open, adjacentMines=0
+    override[0 * size + 0] = 0xFF; // (localX=0, localY=0) is a mine
+    override[3 * size + 3] = 0xFF; // (localX=3, localY=3) is a mine
 
     const chunk = new Chunk(0, 0, size, undefined, override);
 
@@ -56,8 +57,8 @@ describe('Chunk with minesOverride', () => {
   it('should override isMine even when initialCellGenerator is provided', () => {
     // The generator marks everything as a mine; the override says only (0,0) is a mine
     const size = 4;
-    const override = new Uint8Array(size * size); // all 0 = no mines
-    override[0 * size + 0] = 1; // only (localX=0, localY=0) is a mine
+    const override = new Uint8Array(size * size); // all 0 = open, adjacentMines=0
+    override[0 * size + 0] = 0xFF; // only (localX=0, localY=0) is a mine
 
     const allMinesGenerator = (gx: number, gy: number) => ({
       x: gx, y: gy, isMine: true, adjacentMines: 0, revealed: false, flagged: false,
@@ -78,8 +79,8 @@ describe('Chunk with minesOverride', () => {
   it('executeLocalFloodFill stops at cells backed by the override mine buffer', async () => {
     // 4x4 chunk: mine at (2,0) stops flood fill from spreading rightward from (0,0)
     const size = 4;
-    const override = new Uint8Array(size * size); // all 0 = no mines
-    override[0 * size + 2] = 1; // (localX=2, localY=0) is a mine
+    const override = new Uint8Array(size * size); // all 0 = open, adjacentMines=0
+    override[0 * size + 2] = 0xFF; // (localX=2, localY=0) is a mine
 
     const chunk = new Chunk(0, 0, size, undefined, override);
 

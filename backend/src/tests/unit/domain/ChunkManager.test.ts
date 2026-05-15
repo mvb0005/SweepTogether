@@ -16,7 +16,7 @@ describe('ChunkManager and Chunk - Pending Fill Propagation', () => {
     await chunkManager.revealAndPropagate(0, 0);
 
     // All cells in (0,0) should be revealed
-    const chunk = chunkManager.getChunk(0, 0);
+    const chunk = await chunkManager.getChunk(0, 0);
     for (let y = 0; y < CHUNK_SIZE; y++) {
       for (let x = 0; x < CHUNK_SIZE; x++) {
         expect(chunk.getTile(x, y)?.revealed).toBe(true);
@@ -43,20 +43,21 @@ describe('ChunkManager and Chunk - Pending Fill Propagation', () => {
     await chunkManager.revealAndPropagate(0, 0);
 
     // Both (0,0) and (1,1) should be fully revealed
-    expect(chunkManager.getChunk(0, 0).getTile(0, 0)?.revealed).toBe(true);
-    expect(chunkManager.getChunk(1, 1).getTile(0, 0)?.revealed).toBe(true);
+    expect((await chunkManager.getChunk(0, 0)).getTile(0, 0)?.revealed).toBe(true);
+    expect((await chunkManager.getChunk(1, 1)).getTile(0, 0)?.revealed).toBe(true);
 
     // Chunks on the boundary of (0,0) and (1,1) but not active should have pending fills
     const borderedKeys = ['1_0', '-1_0', '0_1', '0_-1', '2_1', '2_2', '1_2'];
     for (const key of borderedKeys) {
-      expect(chunkManager.getChunk(...(key.split('_').map(Number) as [number, number])).getTile(0, 0)?.revealed).toBe(false);
+      const [cx, cy] = key.split('_').map(Number);
+      expect((await chunkManager.getChunk(cx, cy)).getTile(0, 0)?.revealed).toBe(false);
       expect((chunkManager.pendingFills.get(key)?.length ?? 0)).toBeGreaterThan(0);
     }
 
     // Chunks far away should not have been reached
     for (const key of ['5_5', '-2_-2']) {
       const [cx, cy] = key.split('_').map(Number);
-      expect(chunkManager.getChunk(cx, cy).getTile(0, 0)?.revealed).toBe(false);
+      expect((await chunkManager.getChunk(cx, cy)).getTile(0, 0)?.revealed).toBe(false);
       expect(chunkManager.pendingFills.get(key)?.length ?? 0).toBe(0);
     }
   });

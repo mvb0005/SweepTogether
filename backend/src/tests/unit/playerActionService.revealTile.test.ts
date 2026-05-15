@@ -52,7 +52,7 @@ const mockBoardManagerInstance = {
   flagTile: jest.fn(),
   chordTile: jest.fn(),
   convertGlobalToChunkLocalCoordinates: jest.fn(),
-  getChunk: jest.fn().mockReturnValue(mockChunkInstance),
+  getChunk: jest.fn().mockResolvedValue(mockChunkInstance),
 };
 
 describe('PlayerActionService', () => {
@@ -369,13 +369,13 @@ describe('PlayerActionService', () => {
         chunkCoordinate: { x: 0, y: 0 },
         localCoordinate: { x: 5, y: 5 }
       });
-      mockBoardManagerInstance.getChunk.mockReturnValueOnce(undefined as any);
+      mockBoardManagerInstance.getChunk.mockResolvedValueOnce(undefined as any);
 
       await handleRevealTile({ gameId, socketId, x, y });
 
       expect(mockGameUpdateService.sendError).toHaveBeenCalledWith(
         socketId,
-        'Internal server error: Target chunk not found.' // Corrected error message
+        'Failed to reveal tile.'
       );
       expect(mockChunkInstance.revealCell).not.toHaveBeenCalled();
     });

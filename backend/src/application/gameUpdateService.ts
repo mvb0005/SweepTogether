@@ -54,7 +54,7 @@ export class GameUpdateService {
         const chunkManager = this.gameStateService.getChunkManager(gameId);
         for (const key of chunkKeys) {
             const [chunkX, chunkY] = key.split('_').map(Number);
-            const chunk = chunkManager.getChunk(chunkX, chunkY);
+            const chunk = chunkManager.getChunkById(key);
             if (!chunk) continue;
             const filteredTiles = chunk.tiles.map(row =>
                 row.map(cell => ({

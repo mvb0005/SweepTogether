@@ -45,17 +45,35 @@ nginx (:8080)
 
 ## Known Incomplete Work
 
-- **`socketServer.ts` is dead code.** Superseded by `socketHandlers.ts` in Session 32. Safe to delete.
-- **No persistence across server restarts.** Game state is in-memory only. MongoDB is structurally wired but not fully integrated into the game lifecycle.
 - **No player validation on tile actions.** `revealTile`/`flagTile`/`chordClick` go through the event bus without verifying the player exists or is authorised.
-- **Flood fill chunk-border edge case.** Isolated revealed cells appear at chunk boundaries that don't connect correctly to the broader flood fill region. Likely cause: when a 0-cell at a chunk border generates pending fill entry points into an adjacent chunk, cells from that adjacent chunk that should flood BACK into already-loaded chunks never get processed (those chunks won't be re-subscribed). Needs investigation in `processPendingFillsForChunk` / `executeLocalFloodFill` boundary handling.
+- **Flood fill chunk-border edge case.** Isolated revealed cells can appear at chunk boundaries. The global BFS (`runGlobalFloodFill`) fixes most cases, but back-propagation into already-loaded chunks from a newly activated neighbour may still be incomplete in edge cases.
+
+## Pregen Tools
+
+Two pre-generation tools write custom chunk data to MongoDB before the server starts:
+
+```bash
+make pregen-text   # Writes "SweepTogether" as 1-cell-wide mine strokes (primary)
+make pregen        # Writes a 7×7 maze (kept for reference/testing)
+```
+
+After running either tool, restart the backend to clear the in-memory chunk cache:
+```bash
+docker-compose restart backend
+```
+
+**Custom chunk seam rules** (enforced by both tools, validated by `validateSeam` in `pregen-text.ts`):
+1. Outer-face cells of custom chunks bordering noise must mirror `worldGen.isMine()`.
+2. No authored mine on a noise-facing border cell unless `worldGen` also places one there.
+3. `adjacentMines` for custom cells must count mines from noise neighbours via `worldGen`.
+
+**Seed consistency:** The game document (`games` collection, `seed` field) stores the string `gameId` (`"default"`). Both pregen tools write this document before saving chunks. The server reads the same seed on first `joinGame`, so `WorldGenerator("default")` is used everywhere.
 
 ## Scalability Concerns (noted 2026-05-08)
 
-- **Flood fill blocks the event loop.** `runGlobalFloodFill` is a synchronous BFS — a large open area can visit 700+ cells in one call, stalling Socket.IO for all connected clients. Needs chunked/yielded execution or offloading.
+- **Flood fill blocks the event loop.** `runGlobalFloodFill` is a synchronous BFS — a large open area can visit thousands of cells in one call, stalling Socket.IO for all connected clients. The "SweepTogether" text creates a single large open background region that will trigger a very large flood fill on first click. Needs chunked/yielded execution or offloading.
 - **Duplicate chunk subscriptions.** Logs show every chunk subscribed twice per connection. `ChunkLoader`'s `useEffect` likely double-fires on connect due to dependency on both `visibleChunks` and `socket`/`isConnected`.
 - **No debounce on pan.** Every cell-boundary crossing fires `subscribeToChunk`. Rapid panning floods the server with subscription requests.
-- **All state is in-memory / single server.** No horizontal scaling possible until MongoDB persistence is properly integrated.
 - **`pendingFills` grows unbounded.** Fills for chunks nobody ever visits accumulate and are never cleaned up.
 - **Single "default" game.** No multi-room support yet.
 

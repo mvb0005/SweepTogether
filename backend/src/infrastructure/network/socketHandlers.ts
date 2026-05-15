@@ -87,11 +87,8 @@ export function registerSocketHandlers(
       }
       const chunkManager = gameStateService.getChunkManager(gameId);
 
-      // getChunk auto-creates the chunk if it doesn't yet exist
-      const chunk = chunkManager.getChunk(chunkX, chunkY);
-
-      // Apply any persisted revealed/flagged state from MongoDB onto the fresh chunk
-      await gameStateService.applyPersistedChunkState(gameId, chunkX, chunkY);
+      // getChunk loads from MongoDB on cache miss (async, persistence-aware)
+      const chunk = await chunkManager.getChunk(chunkX, chunkY);
 
       // Join the chunk room
       const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
@@ -139,13 +136,17 @@ export function registerSocketHandlers(
   // single chunksData event to this socket only (one React state update on the client).
   socket.on('subscribeToChunks', async (data: { gameId: string; chunks: { chunkX: number; chunkY: number }[] }) => {
     const { gameId } = data;
+    if (!gameStateService.gameExists(gameId)) {
+      socket.emit('error', { message: `Game not found: ${gameId}` });
+      return;
+    }
+    // Single MongoDB query to pre-populate the cache for all uncached chunks
+    await gameStateService.bulkPreloadChunks(gameId, data.chunks);
     const results: { gameId: string; chunkX: number; chunkY: number; tiles: any[][] }[] = [];
     for (const { chunkX, chunkY } of data.chunks) {
       try {
-        if (!gameStateService.gameExists(gameId)) throw new Error(`Game not found: ${gameId}`);
         const chunkManager = gameStateService.getChunkManager(gameId);
-        const chunk = chunkManager.getChunk(chunkX, chunkY);
-        await gameStateService.applyPersistedChunkState(gameId, chunkX, chunkY);
+        const chunk = await chunkManager.getChunk(chunkX, chunkY);
         socket.join(`${gameId}_chunk_${chunkX}_${chunkY}`);
         const chunkId = `${chunkX}_${chunkY}`;
         const fills = chunkManager.pendingFills.get(chunkId) ?? [];

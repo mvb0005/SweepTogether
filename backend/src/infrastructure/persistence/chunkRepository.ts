@@ -46,6 +46,12 @@ export class ChunkRepository {
     return this.collection.findOne({ _id: this.id(gameId, chunkX, chunkY) });
   }
 
+  async loadMany(gameId: string, coords: { chunkX: number; chunkY: number }[]): Promise<Map<string, ChunkDocument>> {
+    const ids = coords.map(({ chunkX, chunkY }) => this.id(gameId, chunkX, chunkY));
+    const docs = await this.collection.find({ _id: { $in: ids } } as any).toArray();
+    return new Map(docs.map(doc => [doc._id, doc]));
+  }
+
   /**
    * Creates an empty chunk document if one doesn't exist.
    * Safe to call concurrently — $setOnInsert is idempotent.

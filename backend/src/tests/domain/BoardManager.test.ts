@@ -18,9 +18,9 @@ describe('ChunkManager', () => {
   });
 
   describe('constructor', () => {
-    it('should initialize correctly', () => {
+    it('should initialize correctly', async () => {
       expect(chunkManager).toBeDefined();
-      const chunk = chunkManager.getChunk(0, 0);
+      const chunk = await chunkManager.getChunk(0, 0);
       expect(MockedChunk).toHaveBeenCalledTimes(1);
       expect(chunk).toBeInstanceOf(MockedChunk);
     });
@@ -97,20 +97,20 @@ describe('ChunkManager', () => {
   });
 
   describe('getChunk', () => {
-    it('should return an existing chunk or create a new one if it does not exist', () => {
-      const createdChunk = chunkManager.getChunk(0, 0);
+    it('should return an existing chunk or create a new one if it does not exist', async () => {
+      const createdChunk = await chunkManager.getChunk(0, 0);
       expect(createdChunk).toBeInstanceOf(MockedChunk);
       expect(MockedChunk).toHaveBeenCalledWith(0, 0, CHUNK_SIZE, expect.any(Function), undefined, expect.any(Function));
 
-      const retrievedChunk = chunkManager.getChunk(0, 0);
+      const retrievedChunk = await chunkManager.getChunk(0, 0);
       expect(retrievedChunk).toBe(createdChunk);
       expect(MockedChunk).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('getChunkById', () => {
-    it('should return an existing chunk by its ID after it has been created', () => {
-      const createdChunk = chunkManager.getChunk(0, 0);
+    it('should return an existing chunk by its ID after it has been created', async () => {
+      const createdChunk = await chunkManager.getChunk(0, 0);
       const chunkId = chunkManager.getChunkId(0, 0);
       const retrievedChunk = chunkManager.getChunkById(chunkId);
       expect(retrievedChunk).toBe(createdChunk);

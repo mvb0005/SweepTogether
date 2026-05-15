@@ -96,13 +96,7 @@ export class PlayerActionService {
             }
 
             const { chunkCoordinate, localCoordinate } = chunkManager.convertGlobalToChunkLocalCoordinates(x, y);
-            const targetChunk = chunkManager.getChunk(chunkCoordinate.x, chunkCoordinate.y);
-
-            if (!targetChunk) {
-                console.error(`Target chunk not found at (${chunkCoordinate.x}, ${chunkCoordinate.y}) for global (${x},${y})`);
-                this.gameUpdateService.sendError(socketId, 'Internal server error: Target chunk not found.');
-                return;
-            }
+            const targetChunk = await chunkManager.getChunk(chunkCoordinate.x, chunkCoordinate.y);
 
             const cellToReveal = targetChunk.getTile(localCoordinate.x, localCoordinate.y);
 

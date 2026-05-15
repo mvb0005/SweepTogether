@@ -111,3 +111,36 @@ All callers are already in `async` functions. Approximately 12 call sites across
 - `GameStateService.applyPersistedChunkState` — replaced by loader logic inside `getChunk`
 - `GameStateService.loadCustomChunkConfigs` — never needed once `getChunk` is lazy
 - `socketHandlers.ts` calls to `applyPersistedChunkState`
+- `socketServer.ts` — dead code superseded by `socketHandlers.ts` since Session 32
+
+---
+
+## Session Notes (2026-05-14)
+
+### What Was Actually Done
+
+The async `getChunk` design was implemented as specified, plus several related fixes discovered during implementation.
+
+**Core changes:**
+- `IChunkManager.getChunk` now returns `Promise<IChunk>`. `ChunkManager.getChunk` checks the in-memory cache first, then calls the injected `persistenceLoader` on a miss. A private `buildChunkFromData` helper is shared between `getChunk` and the new `preloadMany`.
+- `socketServer.ts` deleted — it had grown stale with missing `await` calls and was fully superseded by `socketHandlers.ts`.
+- All `applyPersistedChunkState` call sites removed from `socketHandlers.ts`.
+
+**Bulk preloading (`preloadMany`):**
+- `ChunkRepository.loadMany(gameId, coords)` runs a single `find({ $in: ids })` instead of N individual queries.
+- `ChunkManager.preloadMany(docs[])` populates the cache in one pass.
+- `GameStateService.bulkPreloadChunks(gameId, coords)` orchestrates both — called by `subscribeToChunks` before the per-chunk loop so every subsequent `getChunk` is a cache hit.
+
+**Flood fill fix (reads chunk tiles, not WorldGenerator):**
+- `runGlobalFloodFill` was querying `getCell()` → WorldGenerator, silently ignoring custom mine overrides. Fixed to read directly from `chunkManager.getChunkById().getTile()`.
+
+**Custom chunk buffer encoding (`0xFF = mine, 0–8 = adjacentMines`):**
+- `Chunk` constructor with `minesOverride` now reads `val === 0xFF ? mine : val as adjacentMines`.
+- `pregen-chunks.ts` maze generator rewritten with a two-pass approach: pass 1 builds 0/1 mine layouts (outer-face cells of edge chunks use `worldGen.isMine()` to preserve the noise seam), pass 2 encodes 0xFF/adjacentMines querying `worldGen` for out-of-maze neighbours.
+
+**Test updates:** All tests updated to `mockResolvedValue` for async `getChunk`, buffer encoding updated `1`→`0xFF`, `preloadMany: jest.fn()` added to all `IChunkManager` mocks.
+
+### Deferred / Incomplete
+
+- Flood fill still blocks the event loop synchronously. Not addressed here.
+- `pendingFills` map grows unbounded for unvisited chunks. Not addressed here.
