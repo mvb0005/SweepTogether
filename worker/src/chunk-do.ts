@@ -266,12 +266,16 @@ export class ChunkDO extends DurableObject<Env> {
   private persistReveals(indices: number[], playerId: string): void {
     if (indices.length === 0) return;
     const now = Date.now();
-    const placeholders = indices.map(() => '(?, ?, ?)').join(', ');
-    const values = indices.flatMap(i => [i, playerId, now]);
-    this.sql.exec(
-      `INSERT OR IGNORE INTO reveals (cell_index, player_id, revealed_at) VALUES ${placeholders}`,
-      ...values
-    );
+    // SQLite in Workers caps bound parameters per statement; batch to stay safe.
+    const BATCH = 100;
+    for (let start = 0; start < indices.length; start += BATCH) {
+      const batch = indices.slice(start, start + BATCH);
+      const placeholders = batch.map(() => '(?, ?, ?)').join(', ');
+      this.sql.exec(
+        `INSERT OR IGNORE INTO reveals (cell_index, player_id, revealed_at) VALUES ${placeholders}`,
+        ...batch.flatMap(i => [i, playerId, now])
+      );
+    }
     for (const i of indices) this.revealed.set(i, playerId);
   }
 

@@ -42,14 +42,16 @@ Both `worker/` and `frontend/` pass `tsc --noEmit` clean.
 ### How to run (dev)
 
 ```bash
-# Terminal 1 — Worker (remote CF infrastructure)
-cd worker && npm run dev          # wrangler dev --remote → localhost:8787
+# Terminal 1 — Worker (local Miniflare simulation — SQLite DOs require local mode)
+cd worker && npm run dev          # wrangler dev → localhost:8787
 
 # Terminal 2 — Frontend
 cd frontend && npm run dev        # Vite → localhost:3000
 ```
 
 The frontend connects to `ws://localhost:8787/ws` via `VITE_WORKER_WS_URL`.
+
+> Note: `wrangler dev --remote` does NOT support SQLite Durable Objects. Use local mode for dev, `wrangler deploy` for production.
 
 ## Deferred / Incomplete
 

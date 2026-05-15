@@ -145,13 +145,24 @@ export class SessionDO extends DurableObject<Env> {
     return { chunkX, chunkY, cellIdx };
   }
 
+  private async ensureSubscribed(chunkX: number, chunkY: number): Promise<void> {
+    const key = `${chunkX}:${chunkY}`;
+    if (!this.chunkStubs.has(key)) {
+      const state: ChunkStateResponse = await (this.getChunkStub(chunkX, chunkY) as any)
+        .subscribe(this.ctx.id.toString());
+      this.send({ type: 'chunkState', ...state });
+    }
+  }
+
   private async handleReveal(worldX: number, worldY: number): Promise<void> {
     const { chunkX, chunkY, cellIdx } = this.worldToChunk(worldX, worldY);
+    await this.ensureSubscribed(chunkX, chunkY);
     await (this.getChunkStub(chunkX, chunkY) as any).reveal([cellIdx], this.playerId);
   }
 
   private async handleFlag(worldX: number, worldY: number): Promise<void> {
     const { chunkX, chunkY, cellIdx } = this.worldToChunk(worldX, worldY);
+    await this.ensureSubscribed(chunkX, chunkY);
     await (this.getChunkStub(chunkX, chunkY) as any).toggleFlag(cellIdx, this.playerId);
   }
 

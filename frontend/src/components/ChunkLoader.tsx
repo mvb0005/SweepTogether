@@ -93,6 +93,8 @@ const ChunkLoader: React.FC = () => {
   const { immediateChunks, bufferedChunks } = useViewportContext();
   const { gameId } = useGameContext();
   const [chunks, setChunks]   = useState<ChunkMap>({});
+  const chunksRef             = useRef<ChunkMap>({});
+  chunksRef.current           = chunks;
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
   const subscribedRef         = useRef<Set<string>>(new Set());
@@ -157,7 +159,7 @@ const ChunkLoader: React.FC = () => {
 
       // Merge with any already-pending update for this chunk
       const base = pendingRef.current.get(key)
-        ?? chunks[key]
+        ?? chunksRef.current[key]
         ?? buildChunk(chunkX, chunkY, []);
 
       pendingRef.current.set(key, applyDelta(base, revealed, flagged, unflagged));
