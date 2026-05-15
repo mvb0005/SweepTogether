@@ -1,63 +1,99 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { io, Socket } from 'socket.io-client';
+import React, {
+  createContext, useContext, useEffect, useRef,
+  useState, useCallback, ReactNode,
+} from 'react';
 
-// Extract playerId from URL query params
-const params = new URLSearchParams(window.location.search);
-const playerId = params.get('playerId') || 'Anonymous';
+// Set VITE_WORKER_WS_URL in .env.development or .env.production
+const WORKER_WS_URL = (import.meta as any).env?.VITE_WORKER_WS_URL ?? 'ws://localhost:8787';
 
-// Create the socket instance ONCE, passing playerId as a query param
-const socket: Socket = io({
-  query: { playerId }
-});
+type MessageHandler = (data: Record<string, unknown>) => void;
 
-// Define the context type
 interface SocketContextType {
-  socket: Socket;
+  /** Send a typed message to the Worker */
+  send: (msg: object) => void;
   isConnected: boolean;
+  /** Subscribe to a server message type */
+  on:  (type: string, handler: MessageHandler) => void;
+  /** Unsubscribe a handler */
+  off: (type: string, handler: MessageHandler) => void;
 }
 
-// Create a context for the socket
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
 
 export const useSocket = (): SocketContextType => {
-  const context = useContext(SocketContext);
-  if (!context) {
-    throw new Error('useSocket must be used within a SocketProvider');
-  }
-  return context;
+  const ctx = useContext(SocketContext);
+  if (!ctx) throw new Error('useSocket must be used within a SocketProvider');
+  return ctx;
 };
 
-interface SocketProviderProps {
-  children: ReactNode;
-}
+interface SocketProviderProps { children: ReactNode; }
 
 export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
-  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const wsRef       = useRef<WebSocket | null>(null);
+  const queueRef    = useRef<string[]>([]);
+  const handlersRef = useRef(new Map<string, Set<MessageHandler>>());
 
   useEffect(() => {
-    const handleConnect = () => setIsConnected(true);
-    const handleDisconnect = () => setIsConnected(false);
-    const handleError = () => setIsConnected(false);
+    let ws: WebSocket;
+    let dead = false;
+    let retryTimer: ReturnType<typeof setTimeout>;
 
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-    socket.on('connect_error', handleError);
+    const connect = () => {
+      ws = new WebSocket(`${WORKER_WS_URL}/ws`);
+      wsRef.current = ws;
 
-    // Debug: log all events from the server
-    socket.onAny((event, ...args) => {
-      console.debug(`[SOCKET DEBUG] Event: ${event}`, ...args);
-    });
+      ws.onopen = () => {
+        setIsConnected(true);
+        // Drain queued messages
+        const q = queueRef.current.splice(0);
+        for (const m of q) ws.send(m);
+      };
 
+      ws.onclose = () => {
+        wsRef.current = null;
+        setIsConnected(false);
+        if (!dead) retryTimer = setTimeout(connect, 2000);
+      };
+
+      ws.onerror = () => ws.close();
+
+      ws.onmessage = event => {
+        let msg: { type: string } & Record<string, unknown>;
+        try { msg = JSON.parse(event.data as string); } catch { return; }
+        console.debug('[WS]', msg.type, msg);
+        handlersRef.current.get(msg.type)?.forEach(h => h(msg));
+      };
+    };
+
+    connect();
     return () => {
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-      socket.off('connect_error', handleError);
-      socket.offAny();
+      dead = true;
+      clearTimeout(retryTimer);
+      ws.close();
     };
   }, []);
 
+  const send = useCallback((msg: object) => {
+    const s = JSON.stringify(msg);
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(s);
+    } else {
+      queueRef.current.push(s);
+    }
+  }, []);
+
+  const on = useCallback((type: string, handler: MessageHandler) => {
+    if (!handlersRef.current.has(type)) handlersRef.current.set(type, new Set());
+    handlersRef.current.get(type)!.add(handler);
+  }, []);
+
+  const off = useCallback((type: string, handler: MessageHandler) => {
+    handlersRef.current.get(type)?.delete(handler);
+  }, []);
+
   return (
-    <SocketContext.Provider value={{ socket, isConnected }}>
+    <SocketContext.Provider value={{ send, isConnected, on, off }}>
       {children}
     </SocketContext.Provider>
   );

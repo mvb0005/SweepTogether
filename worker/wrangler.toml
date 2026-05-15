@@ -1,0 +1,16 @@
+name = "sweeptogether"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+account_id = "28a3daef24a78816d843d4a29f701cbc"
+
+[durable_objects]
+bindings = [
+  { name = "SESSION_DO", class_name = "SessionDO" },
+  { name = "CHUNK_DO",   class_name = "ChunkDO"   }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes        = ["SessionDO"]
+new_sqlite_classes = ["ChunkDO"]

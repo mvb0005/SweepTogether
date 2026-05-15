@@ -8,24 +8,104 @@ import { Chunk, ChunkMap, Coordinates } from '../types';
 const CHUNK_SIZE = 32;
 const BUFFER_DEBOUNCE_MS = 300;
 
+// ── Wire → frontend Cell conversion helpers ───────────────────────────────────
+
+interface WireCellState {
+  index: number;
+  isMine: boolean;
+  adjacentMines: number;
+  revealedBy?: string;
+  flaggedBy?: string;
+}
+
+interface WireRevealedCell {
+  index: number;
+  isMine: boolean;
+  adjacentMines: number;
+  playerId: string;
+}
+
+function buildChunk(chunkX: number, chunkY: number, wireCells: WireCellState[]): Chunk {
+  const grid = Array.from({ length: CHUNK_SIZE }, (_, ly) =>
+    Array.from({ length: CHUNK_SIZE }, (_, lx) => ({
+      x: chunkX * CHUNK_SIZE + lx,
+      y: chunkY * CHUNK_SIZE + ly,
+      revealed: false,
+      flagged: false,
+    }))
+  );
+  for (const c of wireCells) {
+    const lx = c.index % CHUNK_SIZE;
+    const ly = Math.floor(c.index / CHUNK_SIZE);
+    grid[ly][lx] = {
+      x: chunkX * CHUNK_SIZE + lx,
+      y: chunkY * CHUNK_SIZE + ly,
+      revealed: !!c.revealedBy,
+      flagged: !!c.flaggedBy,
+      ...(c.revealedBy && { isMine: c.isMine, adjacentMines: c.adjacentMines }),
+    };
+  }
+  return { coords: { x: chunkX, y: chunkY }, cells: grid };
+}
+
+function applyDelta(
+  chunk: Chunk,
+  revealed: WireRevealedCell[] | undefined,
+  flagged: { index: number; playerId: string }[] | undefined,
+  unflagged: number[] | undefined,
+): Chunk {
+  const grid = chunk.cells.map(row => [...row]);
+
+  if (revealed) {
+    for (const c of revealed) {
+      const lx = c.index % CHUNK_SIZE;
+      const ly = Math.floor(c.index / CHUNK_SIZE);
+      grid[ly][lx] = {
+        ...grid[ly][lx],
+        revealed: true,
+        isMine: c.isMine,
+        adjacentMines: c.adjacentMines,
+      };
+    }
+  }
+  if (flagged) {
+    for (const c of flagged) {
+      const lx = c.index % CHUNK_SIZE;
+      const ly = Math.floor(c.index / CHUNK_SIZE);
+      grid[ly][lx] = { ...grid[ly][lx], flagged: true };
+    }
+  }
+  if (unflagged) {
+    for (const idx of unflagged) {
+      const lx = idx % CHUNK_SIZE;
+      const ly = Math.floor(idx / CHUNK_SIZE);
+      grid[ly][lx] = { ...grid[ly][lx], flagged: false };
+    }
+  }
+
+  return { ...chunk, cells: grid };
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 const ChunkLoader: React.FC = () => {
-  const { socket, isConnected } = useSocket();
+  const { send, isConnected, on, off } = useSocket();
   const { immediateChunks, bufferedChunks } = useViewportContext();
   const { gameId } = useGameContext();
-  const [chunks, setChunks] = useState<ChunkMap>({});
+  const [chunks, setChunks]   = useState<ChunkMap>({});
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const subscribedRef = useRef<Set<string>>(new Set());
+  const [error, setError]     = useState<string | null>(null);
+  const subscribedRef         = useRef<Set<string>>(new Set());
   const [debouncedBuffered, setDebouncedBuffered] = useState<Coordinates[]>(bufferedChunks);
 
-  // Pending live updates from chunkData events — flushed once per rAF.
-  const pendingLiveRef = useRef<Map<string, Chunk>>(new Map());
-  const liveRafRef = useRef<number | null>(null);
+  // Batch pending updates — flushed once per rAF
+  const pendingRef = useRef<Map<string, Chunk>>(new Map());
+  const rafRef     = useRef<number | null>(null);
 
-  const flushLiveUpdates = useCallback(() => {
-    const pending = pendingLiveRef.current;
+  const flushPending = useCallback(() => {
+    const pending = pendingRef.current;
     if (pending.size === 0) return;
-    pendingLiveRef.current = new Map();
+    pendingRef.current = new Map();
     setChunks(prev => {
       const next = { ...prev };
       pending.forEach((chunk, key) => { next[key] = chunk; });
@@ -34,118 +114,115 @@ const ChunkLoader: React.FC = () => {
     setIsLoading(false);
   }, []);
 
-  const scheduleLiveFlush = useCallback(() => {
-    if (liveRafRef.current !== null) return;
-    liveRafRef.current = requestAnimationFrame(() => {
-      liveRafRef.current = null;
-      flushLiveUpdates();
+  const scheduleFlush = useCallback(() => {
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      flushPending();
     });
-  }, [flushLiveUpdates]);
+  }, [flushPending]);
 
-  // Debounce buffer chunks only — visible chunks are handled immediately below.
+  // Debounce buffer region
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedBuffered(bufferedChunks), BUFFER_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+    const t = setTimeout(() => setDebouncedBuffered(bufferedChunks), BUFFER_DEBOUNCE_MS);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(bufferedChunks)]);
 
-  // Stable chunkData listener — never torn down by pan updates.
+  // ── Stable message listeners ───────────────────────────────────────────────
+
   useEffect(() => {
-    if (!socket || !isConnected) return;
+    if (!isConnected) return;
 
-    const parseChunk = (data: any): Chunk => ({
-      coords: { x: data.chunkX, y: data.chunkY },
-      cells: data.tiles.map((row: any[]) =>
-        row.map(cell => ({
-          x: cell.x,
-          y: cell.y,
-          revealed: cell.revealed,
-          flagged: cell.flagged,
-          ...(cell.revealed && { isMine: cell.isMine, adjacentMines: cell.adjacentMines }),
-        }))
-      ),
-    });
-
-    // Live per-chunk update — batch via rAF.
-    const handleChunkData = (data: any) => {
-      pendingLiveRef.current.set(`${data.chunkX}_${data.chunkY}`, parseChunk(data));
-      scheduleLiveFlush();
+    // Full state snapshot sent in response to a subscribe message
+    const handleChunkState = (data: Record<string, unknown>) => {
+      const { chunkX, chunkY, cells } = data as {
+        chunkX: number; chunkY: number; cells: WireCellState[];
+      };
+      const key   = `${chunkX}_${chunkY}`;
+      const chunk = buildChunk(chunkX, chunkY, cells ?? []);
+      pendingRef.current.set(key, chunk);
+      scheduleFlush();
     };
 
-    // Bulk initial response — single state update.
-    const handleChunksData = (dataArray: any[]) => {
-      setChunks(prev => {
-        const next = { ...prev };
-        for (const data of dataArray) {
-          next[`${data.chunkX}_${data.chunkY}`] = parseChunk(data);
-        }
-        return next;
-      });
+    // Live delta — apply on top of existing chunk
+    const handleChunkDelta = (data: Record<string, unknown>) => {
+      const { chunkX, chunkY, revealed, flagged, unflagged } = data as {
+        chunkX: number; chunkY: number;
+        revealed?: WireRevealedCell[];
+        flagged?: { index: number; playerId: string }[];
+        unflagged?: number[];
+      };
+      const key = `${chunkX}_${chunkY}`;
+
+      // Merge with any already-pending update for this chunk
+      const base = pendingRef.current.get(key)
+        ?? chunks[key]
+        ?? buildChunk(chunkX, chunkY, []);
+
+      pendingRef.current.set(key, applyDelta(base, revealed, flagged, unflagged));
+      scheduleFlush();
+    };
+
+    const handleError = (data: Record<string, unknown>) => {
+      setError(String(data.message ?? 'Server error'));
       setIsLoading(false);
     };
 
-    const handleError = (_err: any) => {
-      setError('Failed to load chunk data. Please try again.');
-      setIsLoading(false);
-    };
-
-    socket.on('chunkData', handleChunkData);
-    socket.on('chunksData', handleChunksData);
-    socket.on('error', handleError);
+    on('chunkState', handleChunkState);
+    on('chunkDelta', handleChunkDelta);
+    on('error',      handleError);
     return () => {
-      socket.off('chunkData', handleChunkData);
-      socket.off('chunksData', handleChunksData);
-      socket.off('error', handleError);
+      off('chunkState', handleChunkState);
+      off('chunkDelta', handleChunkDelta);
+      off('error',      handleError);
     };
-  }, [socket, isConnected, scheduleLiveFlush]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, scheduleFlush]);
 
-  // Helper: subscribe new chunks, unsubscribe departed ones.
+  // ── Subscription management ────────────────────────────────────────────────
+
   const syncSubscriptions = useCallback((targetKeys: Set<string>, targetChunks: Coordinates[]) => {
-    if (!socket || !gameId) return;
+    if (!isConnected || !gameId) return;
 
     const toSubscribe = targetChunks.filter(c => !subscribedRef.current.has(`${c.x}_${c.y}`));
-    if (toSubscribe.length > 0) {
-      socket.emit('subscribeToChunks', {
-        gameId,
-        chunks: toSubscribe.map(c => ({ chunkX: c.x, chunkY: c.y })),
-      });
-      toSubscribe.forEach(c => subscribedRef.current.add(`${c.x}_${c.y}`));
+    for (const c of toSubscribe) {
+      send({ type: 'subscribe', chunkX: c.x, chunkY: c.y });
+      subscribedRef.current.add(`${c.x}_${c.y}`);
     }
 
-    // Unsubscribe departed chunks from the socket but keep them in render state
-    // so returning to an area shows cached data instead of a void flash.
     for (const key of Array.from(subscribedRef.current)) {
       if (!targetKeys.has(key)) {
         const [x, y] = key.split('_').map(Number);
-        socket.emit('unsubscribeFromChunk', { gameId, chunkX: x, chunkY: y });
+        send({ type: 'unsubscribe', chunkX: x, chunkY: y });
         subscribedRef.current.delete(key);
       }
     }
-  }, [socket, gameId]);
+  }, [isConnected, gameId, send]);
 
-  // Immediately subscribe to exactly-visible chunks.
+  // Immediately subscribe visible chunks
   useEffect(() => {
-    if (!socket || !isConnected || !gameId) return;
+    if (!isConnected || !gameId) return;
     const keys = new Set(immediateChunks.map(c => `${c.x}_${c.y}`));
     syncSubscriptions(keys, immediateChunks);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, isConnected, gameId, JSON.stringify(immediateChunks)]);
+  }, [isConnected, gameId, JSON.stringify(immediateChunks)]);
 
-  // After debounce, expand to buffer + directional chunks.
+  // After debounce, expand to buffer + directional chunks
   useEffect(() => {
-    if (!socket || !isConnected || !gameId) return;
+    if (!isConnected || !gameId) return;
     const keys = new Set(debouncedBuffered.map(c => `${c.x}_${c.y}`));
     syncSubscriptions(keys, debouncedBuffered);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, isConnected, gameId, JSON.stringify(debouncedBuffered)]);
+  }, [isConnected, gameId, JSON.stringify(debouncedBuffered)]);
 
-  // Unsubscribe everything on unmount.
+  // Unsubscribe everything on unmount
   useEffect(() => {
     return () => {
-      if (socket && gameId) {
+      if (isConnected) {
         for (const key of Array.from(subscribedRef.current)) {
           const [x, y] = key.split('_').map(Number);
-          socket.emit('unsubscribeFromChunk', { gameId, chunkX: x, chunkY: y });
+          send({ type: 'unsubscribe', chunkX: x, chunkY: y });
         }
         subscribedRef.current.clear();
       }
@@ -153,8 +230,8 @@ const ChunkLoader: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (error) return <div className="error-message">{error}</div>;
-  if (isLoading) return <div className="loading-message">Loading chunks...</div>;
+  if (error)     return <div className="error-message">{error}</div>;
+  if (isLoading) return <div className="loading-message">Loading chunks…</div>;
 
   return (
     <div style={{ width: '100%', height: '100%' }}>

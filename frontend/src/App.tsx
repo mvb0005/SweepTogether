@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { SocketProvider, useSocket } from './hooks/useSocket';
 import { ViewportProvider } from './contexts/ViewportContext';
@@ -7,50 +7,59 @@ import ChunkLoader from './components/ChunkLoader';
 import SingleChunkPage from './components/SingleChunkPage';
 import './App.css';
 
-const CHUNK_SIZE = 16;
+const CHUNK_SIZE = 32;
+
+// Stable player ID — persisted across page reloads
+function getOrCreatePlayerId(): string {
+  const key = 'sweeptogether_player_id';
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = `player_${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
 
 const AppContent: React.FC = () => {
-  const { socket, isConnected } = useSocket();
-  const [gameId] = useState('default');
-  const [isPlayerLocked] = useState(false);
-  const [playerId, setPlayerId] = useState<string | null>(null);
-  const [isJoined, setIsJoined] = useState(false);
+  const { send, isConnected, on, off } = useSocket();
+  const [isJoined, setIsJoined]       = useState(false);
+  const [isPlayerLocked, setIsPlayerLocked] = useState(false);
+  const playerId = useRef(getOrCreatePlayerId()).current;
 
-  // Extract playerId from URL query params
-  const params = new URLSearchParams(window.location.search);
-  const playerIdFromUrl = params.get('playerId') || 'Anonymous';
-
-  // Join game on connect
+  // Join once connected
   useEffect(() => {
-    if (socket && isConnected && !isJoined) {
-      socket.emit('joinGame', { gameId, username: playerIdFromUrl });
-      socket.on('gameJoined', (data: any) => {
-        setPlayerId(data.playerId);
-        setIsJoined(true);
-      });
-      return () => {
-        socket.off('gameJoined');
-      };
-    }
-  }, [socket, isConnected, gameId, isJoined, playerIdFromUrl]);
+    if (!isConnected || isJoined) return;
+
+    send({ type: 'join', playerId });
+
+    const handleJoined = () => setIsJoined(true);
+    const handleMineHit = () => setIsPlayerLocked(true);
+
+    on('joined', handleJoined);
+    on('mineHit', handleMineHit);
+    return () => {
+      off('joined', handleJoined);
+      off('mineHit', handleMineHit);
+    };
+  }, [isConnected, isJoined, send, on, off, playerId]);
 
   const handleRevealCell = useCallback((x: number, y: number) => {
-    if (!socket || !isConnected || isPlayerLocked || !isJoined || !playerId) return;
-    socket.emit('revealTile', { gameId, playerId, x, y });
-  }, [socket, isConnected, gameId, isPlayerLocked, isJoined, playerId]);
+    if (!isConnected || isPlayerLocked || !isJoined) return;
+    send({ type: 'reveal', worldX: x, worldY: y });
+  }, [isConnected, isPlayerLocked, isJoined, send]);
 
   const handleFlagCell = useCallback((x: number, y: number) => {
-    if (!socket || !isConnected || isPlayerLocked || !isJoined || !playerId) return;
-    socket.emit('flagTile', { gameId, playerId, x, y });
-  }, [socket, isConnected, gameId, isPlayerLocked, isJoined, playerId]);
+    if (!isConnected || isPlayerLocked || !isJoined) return;
+    send({ type: 'flag', worldX: x, worldY: y });
+  }, [isConnected, isPlayerLocked, isJoined, send]);
 
   const handleChordCell = useCallback((x: number, y: number) => {
-    if (!socket || !isConnected || isPlayerLocked || !isJoined || !playerId) return;
-    socket.emit('chordClick', { gameId, playerId, x, y });
-  }, [socket, isConnected, gameId, isPlayerLocked, isJoined, playerId]);
+    if (!isConnected || isPlayerLocked || !isJoined) return;
+    send({ type: 'chord', worldX: x, worldY: y });
+  }, [isConnected, isPlayerLocked, isJoined, send]);
 
   if (!isJoined) {
-    return <div className="loading-message">Joining game...</div>;
+    return <div className="loading-message">Connecting…</div>;
   }
 
   return (
@@ -60,7 +69,7 @@ const AppContent: React.FC = () => {
         <Route path="/" element={
           <div className="game-container">
             <GameProvider
-              gameId={gameId}
+              gameId="default"
               isPlayerLocked={isPlayerLocked}
               onRevealCell={handleRevealCell}
               onFlagCell={handleFlagCell}
@@ -77,14 +86,12 @@ const AppContent: React.FC = () => {
   );
 };
 
-const App: React.FC = () => {
-  return (
-    <SocketProvider>
-      <Router>
-        <AppContent />
-      </Router>
-    </SocketProvider>
-  );
-};
+const App: React.FC = () => (
+  <SocketProvider>
+    <Router>
+      <AppContent />
+    </Router>
+  </SocketProvider>
+);
 
 export default App;
