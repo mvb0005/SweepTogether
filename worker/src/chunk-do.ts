@@ -7,7 +7,6 @@ import {
   ChunkDelta,
   CellState,
   RevealedCell,
-  FlaggedCell,
 } from './types';
 
 export class ChunkDO extends DurableObject<Env> {
@@ -209,7 +208,7 @@ export class ChunkDO extends DurableObject<Env> {
 
   // ── BFS flood fill ───────────────────────────────────────────────────────────
 
-  private runBFS(origins: number[], playerId: string): {
+  private runBFS(origins: number[], _playerId: string): {
     newReveals: number[];
     boundary: Map<string, number[]>; // "cx:cy" → cellIndices in neighbour
   } {
@@ -266,8 +265,8 @@ export class ChunkDO extends DurableObject<Env> {
   private persistReveals(indices: number[], playerId: string): void {
     if (indices.length === 0) return;
     const now = Date.now();
-    // SQLite in Workers caps bound parameters per statement; batch to stay safe.
-    const BATCH = 100;
+    // Workers SQLite caps at 100 bound variables per statement (3 vars/row → max 33 rows).
+    const BATCH = 30;
     for (let start = 0; start < indices.length; start += BATCH) {
       const batch = indices.slice(start, start + BATCH);
       const placeholders = batch.map(() => '(?, ?, ?)').join(', ');

@@ -89,7 +89,7 @@ function applyDelta(
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const ChunkLoader: React.FC = () => {
-  const { send, isConnected, on, off } = useSocket();
+  const { send, isConnected, connectionId, on, off } = useSocket();
   const { immediateChunks, bufferedChunks } = useViewportContext();
   const { gameId } = useGameContext();
   const [chunks, setChunks]   = useState<ChunkMap>({});
@@ -123,6 +123,12 @@ const ChunkLoader: React.FC = () => {
       flushPending();
     });
   }, [flushPending]);
+
+  // On every new connection, reset stale subscription state so chunks are re-subscribed
+  useEffect(() => {
+    subscribedRef.current.clear();
+    setIsLoading(true);
+  }, [connectionId]);
 
   // Debounce buffer region
   useEffect(() => {
@@ -218,18 +224,17 @@ const ChunkLoader: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, gameId, JSON.stringify(debouncedBuffered)]);
 
-  // Unsubscribe everything on unmount
+  // Unsubscribe everything on unmount (best-effort; server also cleans up on WS close)
+  const sendRef = useRef(send);
+  sendRef.current = send;
   useEffect(() => {
     return () => {
-      if (isConnected) {
-        for (const key of Array.from(subscribedRef.current)) {
-          const [x, y] = key.split('_').map(Number);
-          send({ type: 'unsubscribe', chunkX: x, chunkY: y });
-        }
-        subscribedRef.current.clear();
+      for (const key of Array.from(subscribedRef.current)) {
+        const [x, y] = key.split('_').map(Number);
+        sendRef.current({ type: 'unsubscribe', chunkX: x, chunkY: y });
       }
+      subscribedRef.current.clear();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (error)     return <div className="error-message">{error}</div>;

@@ -22,43 +22,39 @@ function getOrCreatePlayerId(): string {
 
 const AppContent: React.FC = () => {
   const { send, isConnected, on, off } = useSocket();
-  const [isJoined, setIsJoined]       = useState(false);
   const [isPlayerLocked, setIsPlayerLocked] = useState(false);
   const playerId = useRef(getOrCreatePlayerId()).current;
 
-  // Join once connected
+  // Send join on every (re)connection for player ID attribution
   useEffect(() => {
-    if (!isConnected || isJoined) return;
-
+    if (!isConnected) return;
     send({ type: 'join', playerId });
+  }, [isConnected, send, playerId]);
 
-    const handleJoined = () => setIsJoined(true);
+  // Mine hit listener
+  useEffect(() => {
+    if (!isConnected) return;
     const handleMineHit = () => setIsPlayerLocked(true);
-
-    on('joined', handleJoined);
     on('mineHit', handleMineHit);
-    return () => {
-      off('joined', handleJoined);
-      off('mineHit', handleMineHit);
-    };
-  }, [isConnected, isJoined, send, on, off, playerId]);
+    return () => off('mineHit', handleMineHit);
+  }, [isConnected, on, off]);
 
   const handleRevealCell = useCallback((x: number, y: number) => {
-    if (!isConnected || isPlayerLocked || !isJoined) return;
+    if (!isConnected || isPlayerLocked) return;
     send({ type: 'reveal', worldX: x, worldY: y });
-  }, [isConnected, isPlayerLocked, isJoined, send]);
+  }, [isConnected, isPlayerLocked, send]);
 
   const handleFlagCell = useCallback((x: number, y: number) => {
-    if (!isConnected || isPlayerLocked || !isJoined) return;
+    if (!isConnected || isPlayerLocked) return;
     send({ type: 'flag', worldX: x, worldY: y });
-  }, [isConnected, isPlayerLocked, isJoined, send]);
+  }, [isConnected, isPlayerLocked, send]);
 
   const handleChordCell = useCallback((x: number, y: number) => {
-    if (!isConnected || isPlayerLocked || !isJoined) return;
+    if (!isConnected || isPlayerLocked) return;
     send({ type: 'chord', worldX: x, worldY: y });
-  }, [isConnected, isPlayerLocked, isJoined, send]);
+  }, [isConnected, isPlayerLocked, send]);
 
-  if (!isJoined) {
+  if (!isConnected) {
     return <div className="loading-message">Connecting…</div>;
   }
 

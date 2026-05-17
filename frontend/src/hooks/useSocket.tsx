@@ -12,6 +12,8 @@ interface SocketContextType {
   /** Send a typed message to the Worker */
   send: (msg: object) => void;
   isConnected: boolean;
+  /** Increments on every new WebSocket connection; use as a dep to reset on reconnect */
+  connectionId: number;
   /** Subscribe to a server message type */
   on:  (type: string, handler: MessageHandler) => void;
   /** Unsubscribe a handler */
@@ -30,6 +32,7 @@ interface SocketProviderProps { children: ReactNode; }
 
 export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionId, setConnectionId] = useState(0);
   const wsRef       = useRef<WebSocket | null>(null);
   const queueRef    = useRef<string[]>([]);
   const handlersRef = useRef(new Map<string, Set<MessageHandler>>());
@@ -44,7 +47,9 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (dead) { ws.close(); return; }
         setIsConnected(true);
+        setConnectionId(n => n + 1);
         // Drain queued messages
         const q = queueRef.current.splice(0);
         for (const m of q) ws.send(m);
@@ -93,7 +98,7 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   }, []);
 
   return (
-    <SocketContext.Provider value={{ send, isConnected, on, off }}>
+    <SocketContext.Provider value={{ send, isConnected, connectionId, on, off }}>
       {children}
     </SocketContext.Provider>
   );
