@@ -7,6 +7,7 @@ import { Chunk, ChunkMap, Coordinates } from '../types';
 
 const CHUNK_SIZE = 32;
 const BUFFER_DEBOUNCE_MS = 300;
+const CHUNK_CACHE_MAX = 64; // keep most-recently-used chunks when unsubscribed
 
 const ChunkLoader: React.FC = () => {
   const { socket, isConnected } = useSocket();
@@ -16,6 +17,8 @@ const ChunkLoader: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const subscribedRef = useRef<Set<string>>(new Set());
+  // LRU order for cached (unsubscribed) chunks — oldest at index 0.
+  const chunkLruRef = useRef<string[]>([]);
   const [debouncedBuffered, setDebouncedBuffered] = useState<Coordinates[]>(bufferedChunks);
 
   // Pending live updates from chunkData events — flushed once per rAF.
@@ -112,13 +115,37 @@ const ChunkLoader: React.FC = () => {
       toSubscribe.forEach(c => subscribedRef.current.add(`${c.x}_${c.y}`));
     }
 
-    // Unsubscribe departed chunks from the socket but keep them in render state
-    // so returning to an area shows cached data instead of a void flash.
+    // Bulk-unsubscribe departed chunks, keep up to CHUNK_CACHE_MAX in state as LRU cache.
+    const departed: string[] = [];
     for (const key of Array.from(subscribedRef.current)) {
       if (!targetKeys.has(key)) {
-        const [x, y] = key.split('_').map(Number);
-        socket.emit('unsubscribeFromChunk', { gameId, chunkX: x, chunkY: y });
         subscribedRef.current.delete(key);
+        departed.push(key);
+      }
+    }
+    if (departed.length > 0) {
+      socket.emit('unsubscribeFromChunks', {
+        gameId,
+        chunks: departed.map(k => {
+          const [x, y] = k.split('_').map(Number);
+          return { chunkX: x, chunkY: y };
+        }),
+      });
+    }
+    if (departed.length > 0) {
+      // Move newly departed chunks to the back of the LRU list.
+      chunkLruRef.current = [
+        ...chunkLruRef.current.filter(k => !departed.includes(k)),
+        ...departed,
+      ];
+      // Evict oldest entries beyond the cache cap.
+      const evict = chunkLruRef.current.splice(0, Math.max(0, chunkLruRef.current.length - CHUNK_CACHE_MAX));
+      if (evict.length > 0) {
+        setChunks(prev => {
+          const next = { ...prev };
+          evict.forEach(k => delete next[k]);
+          return next;
+        });
       }
     }
   }, [socket, gameId]);
@@ -142,11 +169,14 @@ const ChunkLoader: React.FC = () => {
   // Unsubscribe everything on unmount.
   useEffect(() => {
     return () => {
-      if (socket && gameId) {
-        for (const key of Array.from(subscribedRef.current)) {
-          const [x, y] = key.split('_').map(Number);
-          socket.emit('unsubscribeFromChunk', { gameId, chunkX: x, chunkY: y });
-        }
+      if (socket && gameId && subscribedRef.current.size > 0) {
+        socket.emit('unsubscribeFromChunks', {
+          gameId,
+          chunks: Array.from(subscribedRef.current).map(k => {
+            const [x, y] = k.split('_').map(Number);
+            return { chunkX: x, chunkY: y };
+          }),
+        });
         subscribedRef.current.clear();
       }
     };

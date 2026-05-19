@@ -3,7 +3,7 @@ import { useViewport } from '../hooks/useViewport';
 import { ChunkCoords, Coordinates, ViewportState } from '../types';
 
 const CELL_SIZE = 30;
-const CHUNK_BUFFER = 3;
+const CHUNK_BUFFER = 2;
 const DIRECTION_EXTRA = 1;
 
 export interface ViewportContextValue {

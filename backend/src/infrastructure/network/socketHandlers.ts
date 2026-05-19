@@ -175,11 +175,16 @@ export function registerSocketHandlers(
     }
   });
 
-  // --- unsubscribeFromChunk ---
+  // --- unsubscribeFromChunk (single, kept for compat) ---
   socket.on('unsubscribeFromChunk', (data: { gameId: string; chunkX: number; chunkY: number }) => {
-    const { gameId, chunkX, chunkY } = data;
-    const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
-    socket.leave(chunkRoom);
+    socket.leave(`${data.gameId}_chunk_${data.chunkX}_${data.chunkY}`);
+  });
+
+  // --- unsubscribeFromChunks (bulk) ---
+  socket.on('unsubscribeFromChunks', (data: { gameId: string; chunks: { chunkX: number; chunkY: number }[] }) => {
+    for (const { chunkX, chunkY } of data.chunks) {
+      socket.leave(`${data.gameId}_chunk_${chunkX}_${chunkY}`);
+    }
   });
 
   // Dynamically register handlers for only the events with subscribers

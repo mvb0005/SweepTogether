@@ -60,12 +60,19 @@ const CanvasBoard: React.FC<CanvasBoardProps> = ({ chunks, chunkSize }) => {
     ctx.fillStyle = '#9e9e9e';
     ctx.fillRect(0, 0, logW, logH);
     ctx.fillStyle = '#bdbdbd';
-    for (const chunk of Object.values(allChunks)) {
-      const chunkPx = chunkSize * cellPx;
-      const csx = (chunk.coords.x * chunkSize - worldLeft) * cellPx;
-      const csy = (chunk.coords.y * chunkSize - worldTop)  * cellPx;
-      if (csx + chunkPx < 0 || csx > logW || csy + chunkPx < 0 || csy > logH) continue;
-      ctx.fillRect(csx, csy, chunkPx, chunkPx);
+    const chunkPx = chunkSize * cellPx;
+    const visMinCx = Math.floor(worldLeft / chunkSize);
+    const visMaxCx = Math.floor((worldLeft + logW / cellPx) / chunkSize);
+    const visMinCy = Math.floor(worldTop  / chunkSize);
+    const visMaxCy = Math.floor((worldTop  + logH / cellPx) / chunkSize);
+
+    for (let cx = visMinCx; cx <= visMaxCx; cx++) {
+      for (let cy = visMinCy; cy <= visMaxCy; cy++) {
+        if (!allChunks[`${cx}_${cy}`]) continue;
+        const csx = (cx * chunkSize - worldLeft) * cellPx;
+        const csy = (cy * chunkSize - worldTop)  * cellPx;
+        ctx.fillRect(csx, csy, chunkPx, chunkPx);
+      }
     }
 
     // Cell grid lines + chunk border guides spanning full viewport.
@@ -106,40 +113,41 @@ const CanvasBoard: React.FC<CanvasBoardProps> = ({ chunks, chunkSize }) => {
       ctx.stroke();
     }
 
-    for (const chunk of Object.values(allChunks)) {
-      const baseX = chunk.coords.x * chunkSize;
-      const baseY = chunk.coords.y * chunkSize;
+    ctx.font = `${cellPx * 0.65}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
 
-      for (let cy = 0; cy < chunk.cells.length; cy++) {
-        const row = chunk.cells[cy];
-        for (let cx = 0; cx < row.length; cx++) {
-          const cell = row[cx];
-          if (!cell.revealed && !cell.flagged) continue;
+    for (let cx = visMinCx; cx <= visMaxCx; cx++) {
+      for (let cy = visMinCy; cy <= visMaxCy; cy++) {
+        const chunk = allChunks[`${cx}_${cy}`];
+        if (!chunk) continue;
+        const baseX = cx * chunkSize;
+        const baseY = cy * chunkSize;
 
-          const sx = (baseX + cx - worldLeft) * cellPx;
-          const sy = (baseY + cy - worldTop)  * cellPx;
+        for (let lcy = 0; lcy < chunk.cells.length; lcy++) {
+          const row = chunk.cells[lcy];
+          for (let lcx = 0; lcx < row.length; lcx++) {
+            const cell = row[lcx];
+            if (!cell.revealed && !cell.flagged) continue;
 
-          if (sx + cellPx < 0 || sx > logW || sy + cellPx < 0 || sy > logH) continue;
+            const sx = (baseX + lcx - worldLeft) * cellPx;
+            const sy = (baseY + lcy - worldTop)  * cellPx;
 
-          ctx.fillStyle = cell.revealed ? '#eeeeee' : '#ffd700';
-          ctx.fillRect(sx, sy, cellPx - 1, cellPx - 1);
+            ctx.fillStyle = cell.revealed ? '#eeeeee' : '#ffd700';
+            ctx.fillRect(sx, sy, cellPx - 1, cellPx - 1);
 
-          if (cell.revealed && cell.isMine) {
-            ctx.font = `${cellPx * 0.65}px serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('💣', sx + cellPx / 2, sy + cellPx / 2);
-          } else if (cell.flagged && !cell.revealed) {
-            ctx.font = `${cellPx * 0.65}px serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('🚩', sx + cellPx / 2, sy + cellPx / 2);
-          } else if (cell.revealed && !cell.isMine && cell.adjacentMines && cell.adjacentMines > 0) {
-            ctx.fillStyle = NUMBER_COLORS[cell.adjacentMines] ?? '#333';
-            ctx.font = `bold ${Math.max(8, cellPx * 0.5)}px monospace`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(String(cell.adjacentMines), sx + cellPx / 2, sy + cellPx / 2);
+            if (cell.revealed && cell.isMine) {
+              ctx.fillText('💣', sx + cellPx / 2, sy + cellPx / 2);
+            } else if (cell.flagged && !cell.revealed) {
+              ctx.fillText('🚩', sx + cellPx / 2, sy + cellPx / 2);
+            } else if (cell.revealed && !cell.isMine && cell.adjacentMines && cell.adjacentMines > 0) {
+              ctx.fillStyle = NUMBER_COLORS[cell.adjacentMines] ?? '#333';
+              ctx.font = `bold ${Math.max(8, cellPx * 0.5)}px monospace`;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(String(cell.adjacentMines), sx + cellPx / 2, sy + cellPx / 2);
+              ctx.font = `${cellPx * 0.65}px serif`;
+            }
           }
         }
       }
