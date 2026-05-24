@@ -167,6 +167,12 @@ export function useChunkSubscriptions(
           return { chunkX: x, chunkY: y };
         }),
       });
+      // Evict departed chunks from state so memory doesn't grow unboundedly.
+      setChunks(prev => {
+        const next = { ...prev };
+        for (const key of departed) delete next[key];
+        return next;
+      });
     }
   }, [socket, gameId]);
 
