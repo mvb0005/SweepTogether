@@ -41,18 +41,24 @@ interface ViewportProviderProps {
   children: React.ReactNode;
 }
 
+function distSq(cx: number, cy: number, chunkSize: number, center: Coordinates): number {
+  const wx = cx * chunkSize + chunkSize / 2;
+  const wy = cy * chunkSize + chunkSize / 2;
+  return (wx - center.x) ** 2 + (wy - center.y) ** 2;
+}
+
 function getVisibleChunks(viewport: ViewportState, chunkSize: number): ChunkCoords[] {
   const minX = Math.floor((viewport.center.x - viewport.width / 2) / chunkSize);
   const maxX = Math.floor((viewport.center.x + viewport.width / 2) / chunkSize);
   const minY = Math.floor((viewport.center.y - viewport.height / 2) / chunkSize);
   const maxY = Math.floor((viewport.center.y + viewport.height / 2) / chunkSize);
   const chunks: ChunkCoords[] = [];
-  for (let cx = minX; cx <= maxX; cx++) {
-    for (let cy = minY; cy <= maxY; cy++) {
+  for (let cx = minX; cx <= maxX; cx++)
+    for (let cy = minY; cy <= maxY; cy++)
       chunks.push({ x: cx, y: cy });
-    }
-  }
-  return chunks;
+  return chunks.sort((a, b) =>
+    distSq(a.x, a.y, chunkSize, viewport.center) - distSq(b.x, b.y, chunkSize, viewport.center)
+  );
 }
 
 function getBufferedChunks(
@@ -71,12 +77,12 @@ function getBufferedChunks(
   const bufMaxY = maxY + CHUNK_BUFFER + (panDir.dy > 0 ? CHUNK_DIRECTION_EXTRA : 0);
 
   const chunks: ChunkCoords[] = [];
-  for (let cx = bufMinX; cx <= bufMaxX; cx++) {
-    for (let cy = bufMinY; cy <= bufMaxY; cy++) {
+  for (let cx = bufMinX; cx <= bufMaxX; cx++)
+    for (let cy = bufMinY; cy <= bufMaxY; cy++)
       chunks.push({ x: cx, y: cy });
-    }
-  }
-  return chunks;
+  return chunks.sort((a, b) =>
+    distSq(a.x, a.y, chunkSize, viewport.center) - distSq(b.x, b.y, chunkSize, viewport.center)
+  );
 }
 
 export const ViewportProvider: React.FC<ViewportProviderProps> = ({

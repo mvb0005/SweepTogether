@@ -119,8 +119,10 @@ export function registerSocketHandlers(
   });
 
   // --- subscribeToChunks (bulk) ---
-  // Joins all requested chunk rooms, processes pending fills, then responds with a
-  // single chunksData event to this socket only (one React state update on the client).
+  // Joins all requested chunk rooms, then streams chunk data back to the client one
+  // chunk at a time — already-cached chunks arrive immediately, uncached chunks are
+  // built sequentially with event-loop yields between each so other clients aren't
+  // blocked. Flood fills run after all chunks are loaded.
   socket.on('subscribeToChunks', async (data: { gameId: string; chunks: { chunkX: number; chunkY: number }[] }) => {
     const t0 = performance.now();
     const { gameId } = data;
@@ -128,51 +130,46 @@ export function registerSocketHandlers(
       socket.emit('error', { message: `Game not found: ${gameId}` });
       return;
     }
-    // Single MongoDB query to pre-populate the cache for all uncached chunks
-    await gameStateService.bulkPreloadChunks(gameId, data.chunks);
-    const tAfterPreload = performance.now();
 
-    // Join all chunk rooms and collect all pending fills across every chunk
+    // Join all chunk rooms upfront so live broadcasts arrive even during build.
+    for (const { chunkX, chunkY } of data.chunks) {
+      socket.join(`${gameId}_chunk_${chunkX}_${chunkY}`);
+    }
+
     const chunkManager = gameStateService.getChunkManager(gameId);
     const allFillPoints: { x: number; y: number }[] = [];
-    const chunks: { chunkX: number; chunkY: number }[] = [];
-    for (const { chunkX, chunkY } of data.chunks) {
-      try {
-        await chunkManager.getChunk(chunkX, chunkY);
-        socket.join(`${gameId}_chunk_${chunkX}_${chunkY}`);
-        const chunkId = `${chunkX}_${chunkY}`;
-        const fills = chunkManager.pendingFills.get(chunkId) ?? [];
-        if (fills.length > 0) {
-          chunkManager.pendingFills.delete(chunkId);
-          try { await getPendingFillsRepository().delete(gameId, chunkId); } catch {}
-          for (const fill of fills) {
-            allFillPoints.push({ x: chunkX * CHUNK_SIZE + fill.localX, y: chunkY * CHUNK_SIZE + fill.localY });
-          }
+
+    // Stream chunks back as they're ready; collect pending fills along the way.
+    await gameStateService.streamChunks(gameId, data.chunks, (chunk) => {
+      const [chunkX, chunkY] = chunk.id.split('_').map(Number);
+      socket.emit('chunkData', serializeChunk(chunk, gameId));
+      const fills = chunkManager.pendingFills.get(chunk.id) ?? [];
+      if (fills.length > 0) {
+        chunkManager.pendingFills.delete(chunk.id);
+        getPendingFillsRepository().delete(gameId, chunk.id).catch(() => {});
+        for (const fill of fills) {
+          allFillPoints.push({ x: chunkX * CHUNK_SIZE + fill.localX, y: chunkY * CHUNK_SIZE + fill.localY });
         }
-        chunks.push({ chunkX, chunkY });
-      } catch (error) {
-        console.error(`[subscribeToChunks] Error for chunk (${chunkX},${chunkY}):`, error);
       }
-    }
-
-    // Run a single bulk flood fill for all pending start points
-    const tFill0 = performance.now();
-    if (allFillPoints.length > 0) {
-      await gameStateService.runBulkFloodFill(gameId, allFillPoints, socket.id);
-    }
-    const fillsMs = (performance.now() - tFill0).toFixed(1);
-
-    // Build and send chunk data (tiles already reflect flood fill results)
-    const results = chunks.map(({ chunkX, chunkY }) => {
-      const chunk = chunkManager.getChunkById(`${chunkX}_${chunkY}`)!;
-      return serializeChunk(chunk, gameId);
     });
-    if (results.length > 0) {
-      socket.emit('chunksData', results);
+
+    const streamMs = (performance.now() - t0).toFixed(1);
+
+    // Run flood fills in the background — results broadcast to chunk rooms, so
+    // the client receives them automatically without needing to wait here.
+    if (allFillPoints.length > 0) {
+      setImmediate(async () => {
+        const tf = performance.now();
+        try {
+          await gameStateService.runBulkFloodFill(gameId, allFillPoints, socket.id);
+          console.log(`[fills] ${allFillPoints.length} points done in ${(performance.now() - tf).toFixed(1)}ms socket=${socket.id}`);
+        } catch (err) {
+          console.error('[subscribeToChunks] flood fill error:', err);
+        }
+      });
     }
-    const totalMs = (performance.now() - t0).toFixed(1);
-    const preloadMs = (tAfterPreload - t0).toFixed(1);
-    console.log(`[subscribeToChunks] chunks=${data.chunks.length} fills=${allFillPoints.length} preload=${preloadMs}ms fills=${fillsMs}ms total=${totalMs}ms socket=${socket.id}`);
+
+    console.log(`[subscribeToChunks] chunks=${data.chunks.length} fills=${allFillPoints.length} stream=${streamMs}ms socket=${socket.id}`);
   });
 
   // --- unsubscribeFromChunk (single, kept for compat) ---

@@ -374,27 +374,50 @@ export class GameStateService {
     }
 
     /**
-     * Bulk-preloads uncached chunks from MongoDB in a single query,
-     * populating the ChunkManager's in-memory cache before per-chunk processing.
+     * Streams chunks to the caller one at a time as they are built, yielding the
+     * event loop between each uncached chunk so other requests can be serviced.
+     * Already-cached chunks are delivered synchronously before the DB round-trip.
+     * One DB query is used for all uncached chunks regardless of count.
      */
-    async bulkPreloadChunks(gameId: string, coords: { chunkX: number; chunkY: number }[]): Promise<void> {
+    async streamChunks(
+        gameId: string,
+        coords: { chunkX: number; chunkY: number }[],
+        onChunk: (chunk: IChunk) => void,
+    ): Promise<void> {
         const chunkManager = this.getChunkManager(gameId);
-        const uncached = coords.filter(
-            ({ chunkX, chunkY }) => !chunkManager.chunks.has(chunkManager.getChunkId(chunkX, chunkY))
-        );
+
+        // Deliver already-cached chunks immediately — zero build cost.
+        const uncached: { chunkX: number; chunkY: number }[] = [];
+        for (const { chunkX, chunkY } of coords) {
+            const cached = chunkManager.getChunkById(chunkManager.getChunkId(chunkX, chunkY));
+            if (cached) {
+                onChunk(cached);
+            } else {
+                uncached.push({ chunkX, chunkY });
+            }
+        }
         if (uncached.length === 0) return;
+
+        // One DB round-trip for all uncached chunks.
         const t0 = performance.now();
         const docsMap = await getChunkRepository().loadMany(gameId, uncached);
         const dbMs = (performance.now() - t0).toFixed(1);
-        const tDecode0 = performance.now();
-        const preloadData = uncached.map(({ chunkX, chunkY }) => {
+
+        // Build and deliver one chunk at a time, yielding between each so the
+        // event loop remains responsive to other clients during a large pan.
+        let built = 0;
+        for (const { chunkX, chunkY } of uncached) {
             const doc = docsMap.get(`${gameId}_${chunkX}_${chunkY}`);
-            if (!doc) return { chunkX, chunkY, mines: undefined as Uint8Array | undefined, revealedIndices: new Set<number>(), flaggedIndices: new Set<number>() };
-            return { chunkX, chunkY, mines: ChunkRepository.decodeMines(doc), ...ChunkRepository.decode(doc) };
-        });
-        await chunkManager.preloadMany(preloadData);
-        const decodeMs = (performance.now() - tDecode0).toFixed(1);
-        console.log(`[bulkPreload] chunks=${uncached.length} db=${dbMs}ms decode+build=${decodeMs}ms`);
+            const mines = doc ? ChunkRepository.decodeMines(doc) : undefined;
+            const { revealedIndices, flaggedIndices } = doc
+                ? ChunkRepository.decode(doc)
+                : { revealedIndices: new Set<number>(), flaggedIndices: new Set<number>() };
+            await chunkManager.preloadMany([{ chunkX, chunkY, mines, revealedIndices, flaggedIndices }]);
+            onChunk(chunkManager.getChunkById(chunkManager.getChunkId(chunkX, chunkY))!);
+            built++;
+            await new Promise<void>(resolve => setImmediate(resolve));
+        }
+        console.log(`[streamChunks] cached=${coords.length - uncached.length} built=${built} db=${dbMs}ms`);
     }
 
     /**
@@ -423,7 +446,12 @@ export class GameStateService {
             if (!visited.has(key)) { visited.add(key); queue.push({ x, y }); }
         }
 
+        let steps = 0;
         while (queue.length > 0) {
+            // Yield every 500 steps so the event loop can handle other requests
+            // during large flood fills (e.g. the SweepTogether open region).
+            if (++steps % 500 === 0) await new Promise<void>(r => setImmediate(r));
+
             const { x, y } = queue.shift()!;
             const { chunkCoordinate: cc, localCoordinate: lc } = chunkManager.convertGlobalToChunkLocalCoordinates(x, y);
             const cellChunk = chunkManager.getChunkById(chunkManager.getChunkId(cc.x, cc.y));
