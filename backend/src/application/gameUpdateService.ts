@@ -13,6 +13,7 @@ import {
     TileUpdatePayload,
     TilesUpdatePayload,
 } from '../domain/types';
+import { serializeChunk } from './gameStateService';
 import { GameStateService } from './gameStateService';
 import { CHUNK_SIZE } from '../types/chunkTypes';
 
@@ -55,18 +56,7 @@ export class GameUpdateService {
             const [chunkX, chunkY] = key.split('_').map(Number);
             const chunk = chunkManager.getChunkById(key);
             if (!chunk) continue;
-            const filteredTiles = chunk.tiles.map(row =>
-                row.map(cell => ({
-                    x: cell.x,
-                    y: cell.y,
-                    revealed: cell.revealed,
-                    flagged: cell.flagged,
-                    ...(cell.revealed && { isMine: cell.isMine, adjacentMines: cell.adjacentMines })
-                }))
-            );
-            this.io.to(`${gameId}_chunk_${chunkX}_${chunkY}`).emit('chunkData', {
-                gameId, chunkX, chunkY, tiles: filteredTiles
-            });
+            this.io.to(`${gameId}_chunk_${chunkX}_${chunkY}`).emit('chunkData', serializeChunk(chunk, gameId));
         }
     }
 

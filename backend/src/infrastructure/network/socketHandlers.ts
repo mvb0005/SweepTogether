@@ -6,7 +6,7 @@ import {
 import { CHUNK_SIZE } from '../../types/chunkTypes';
 import { EventBus } from '../eventBus/EventBus';
 import { SocketEventMap } from './socketEvents';
-import { GameStateService } from '../../application/gameStateService';
+import { GameStateService, serializeChunk } from '../../application/gameStateService';
 import { getPendingFillsRepository } from '../persistence/db';
 
 /**
@@ -108,20 +108,7 @@ export function registerSocketHandlers(
         }
       }
 
-      // Send the initial chunk data to the subscribing socket
-      const filteredTiles = chunk.tiles.map(row =>
-        row.map(cell => ({
-          x: cell.x,
-          y: cell.y,
-          revealed: cell.revealed,
-          flagged: cell.flagged,
-          ...(cell.revealed && {
-            isMine: cell.isMine,
-            adjacentMines: cell.adjacentMines,
-          }),
-        }))
-      );
-      socket.emit('chunkData', { gameId, chunkX, chunkY, tiles: filteredTiles });
+      socket.emit('chunkData', serializeChunk(chunk, gameId));
     } catch (error) {
       console.error('[subscribeToChunk] Error:', error);
       socket.emit('error', {
@@ -135,6 +122,7 @@ export function registerSocketHandlers(
   // Joins all requested chunk rooms, processes pending fills, then responds with a
   // single chunksData event to this socket only (one React state update on the client).
   socket.on('subscribeToChunks', async (data: { gameId: string; chunks: { chunkX: number; chunkY: number }[] }) => {
+    const t0 = performance.now();
     const { gameId } = data;
     if (!gameStateService.gameExists(gameId)) {
       socket.emit('error', { message: `Game not found: ${gameId}` });
@@ -142,11 +130,15 @@ export function registerSocketHandlers(
     }
     // Single MongoDB query to pre-populate the cache for all uncached chunks
     await gameStateService.bulkPreloadChunks(gameId, data.chunks);
-    const results: { gameId: string; chunkX: number; chunkY: number; tiles: any[][] }[] = [];
+    const tAfterPreload = performance.now();
+
+    // Join all chunk rooms and collect all pending fills across every chunk
+    const chunkManager = gameStateService.getChunkManager(gameId);
+    const allFillPoints: { x: number; y: number }[] = [];
+    const chunks: { chunkX: number; chunkY: number }[] = [];
     for (const { chunkX, chunkY } of data.chunks) {
       try {
-        const chunkManager = gameStateService.getChunkManager(gameId);
-        const chunk = await chunkManager.getChunk(chunkX, chunkY);
+        await chunkManager.getChunk(chunkX, chunkY);
         socket.join(`${gameId}_chunk_${chunkX}_${chunkY}`);
         const chunkId = `${chunkX}_${chunkY}`;
         const fills = chunkManager.pendingFills.get(chunkId) ?? [];
@@ -154,25 +146,33 @@ export function registerSocketHandlers(
           chunkManager.pendingFills.delete(chunkId);
           try { await getPendingFillsRepository().delete(gameId, chunkId); } catch {}
           for (const fill of fills) {
-            await gameStateService.runGlobalFloodFill(gameId, chunkX * CHUNK_SIZE + fill.localX, chunkY * CHUNK_SIZE + fill.localY, socket.id);
+            allFillPoints.push({ x: chunkX * CHUNK_SIZE + fill.localX, y: chunkY * CHUNK_SIZE + fill.localY });
           }
         }
-        results.push({
-          gameId, chunkX, chunkY,
-          tiles: chunk.tiles.map(row =>
-            row.map(cell => ({
-              x: cell.x, y: cell.y, revealed: cell.revealed, flagged: cell.flagged,
-              ...(cell.revealed && { isMine: cell.isMine, adjacentMines: cell.adjacentMines }),
-            }))
-          ),
-        });
+        chunks.push({ chunkX, chunkY });
       } catch (error) {
         console.error(`[subscribeToChunks] Error for chunk (${chunkX},${chunkY}):`, error);
       }
     }
+
+    // Run a single bulk flood fill for all pending start points
+    const tFill0 = performance.now();
+    if (allFillPoints.length > 0) {
+      await gameStateService.runBulkFloodFill(gameId, allFillPoints, socket.id);
+    }
+    const fillsMs = (performance.now() - tFill0).toFixed(1);
+
+    // Build and send chunk data (tiles already reflect flood fill results)
+    const results = chunks.map(({ chunkX, chunkY }) => {
+      const chunk = chunkManager.getChunkById(`${chunkX}_${chunkY}`)!;
+      return serializeChunk(chunk, gameId);
+    });
     if (results.length > 0) {
       socket.emit('chunksData', results);
     }
+    const totalMs = (performance.now() - t0).toFixed(1);
+    const preloadMs = (tAfterPreload - t0).toFixed(1);
+    console.log(`[subscribeToChunks] chunks=${data.chunks.length} fills=${allFillPoints.length} preload=${preloadMs}ms fills=${fillsMs}ms total=${totalMs}ms socket=${socket.id}`);
   });
 
   // --- unsubscribeFromChunk (single, kept for compat) ---

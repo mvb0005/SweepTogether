@@ -22,7 +22,6 @@ export interface ChunkDocument {
   revealed: Buffer;
   /** CELLS_PER_CHUNK-byte buffer: -1 (0xFF) = unflagged, 0..63 = playerIndex who flagged */
   flagged: Buffer;
-  loc: [number, number];
   updatedAt: Date;
   chunkConfig?: { type: 'noise' } | { type: 'custom'; mines: Binary }; // Binary from 'mongodb'
 }
@@ -67,7 +66,6 @@ export class ChunkRepository {
           players: [],
           revealed: emptyBuffer(),
           flagged: emptyBuffer(),
-          loc: [chunkX, chunkY] as [number, number],
           updatedAt: new Date(),
         },
       },
@@ -194,7 +192,6 @@ export class ChunkRepository {
           players,
           revealed: revealedBuf,
           flagged: emptyBuffer(),
-          loc: [chunkX, chunkY] as [number, number],
           updatedAt: new Date(),
           chunkConfig: { type: 'custom', mines: new Binary(Buffer.from(mines)) },
         },

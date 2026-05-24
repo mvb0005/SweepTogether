@@ -11,18 +11,19 @@ ENV NODE_ENV=${NODE_ENV}
 # Copy package.json and package-lock.json (if available)
 COPY package*.json ./
 
-# Install dependencies based on NODE_ENV
-RUN npm install;
+# Install all dependencies (including devDeps needed for tsc)
+RUN npm install --include=dev
 
 # Bundle app source
-# For development, we might mount the source code instead of copying
 COPY . .
 
-# Build TypeScript if in production
+# Build TypeScript and prune devDeps in production
 RUN if [ "$NODE_ENV" = "production" ]; then \
-      npm run build; \
+      npm run build && npm prune --production; \
     fi
 
 # Make port 3000 available
 EXPOSE 3000
+
+CMD ["npm", "start"]
 

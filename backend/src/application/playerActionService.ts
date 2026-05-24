@@ -13,7 +13,6 @@ import { GameUpdateService } from './gameUpdateService';
 import { ScoreService } from './scoreService';
 import { PlayerStatus, Cell, GameState, Player } from '../domain/types';
 import * as gridLogic from '../domain/gridLogic';
-import { generateBoardTextRepresentation } from '../utils';
 import { getChunkRepository } from '../infrastructure/persistence/db';
 import { CHUNK_SIZE } from '../types/chunkTypes';
 
@@ -209,6 +208,19 @@ export class PlayerActionService {
                 console.error('[handleFlagTile] Failed to persist flag state:', err);
             }
 
+            // Sync flag state to the ChunkManager in-memory tile so sendTileUpdate
+            // broadcasts the updated flag value (sendTilesUpdate reads from the chunk cache).
+            const chunkManager = this.gameStateService.getChunkManager(gameId);
+            const flagChunkX = Math.floor(updatedCell.x / CHUNK_SIZE);
+            const flagChunkY = Math.floor(updatedCell.y / CHUNK_SIZE);
+            const flagLocalX = ((updatedCell.x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+            const flagLocalY = ((updatedCell.y % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+            const flagChunk = chunkManager.getChunkById(`${flagChunkX}_${flagChunkY}`);
+            if (flagChunk) {
+                const tile = flagChunk.getTile(flagLocalX, flagLocalY);
+                if (tile) flagChunk.setTile(flagLocalX, flagLocalY, { ...tile, flagged: updatedCell.flagged });
+            }
+
             // Update score via ScoreService (handles score calculation and update notification)
             this.scoreService.handleFlagToggle(gameId, socketId, updatedCell.flagged);
 
@@ -242,81 +254,88 @@ export class PlayerActionService {
 
         const { gameState, player } = validationResult;
 
-        // Call chordClick from gridLogic
         try {
-            const result = await gridLogic.chordClick(
-                gameState,
-                x,
-                y,
-                this.gameStateService.getCell
-            );
+            const chunkManager = this.gameStateService.getChunkManager(gameId);
 
-            // Handle result
-            if ('hitMine' in result) {
-                // Mine hit case
-                const { hitMine } = result;
+            const { chunkCoordinate: cc, localCoordinate: lc } = chunkManager.convertGlobalToChunkLocalCoordinates(x, y);
+            const centerChunk = await chunkManager.getChunk(cc.x, cc.y);
+            const centerCell = centerChunk?.getTile(lc.x, lc.y);
 
-                // Update player status to LOCKED_OUT
+            if (!centerCell || !centerCell.revealed || centerCell.adjacentMines === 0) {
+                console.log(`Chord click at (${x},${y}): center cell not a valid chord target.`);
+                return;
+            }
+
+            const DIRS = [[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]] as const;
+            let adjacentFlags = 0;
+            const hiddenNeighbors: { x: number; y: number; isMine: boolean }[] = [];
+
+            for (const [dx, dy] of DIRS) {
+                const nx = x + dx;
+                const ny = y + dy;
+                const { chunkCoordinate: nc, localCoordinate: nl } = chunkManager.convertGlobalToChunkLocalCoordinates(nx, ny);
+                const neighborChunk = await chunkManager.getChunk(nc.x, nc.y);
+                const neighborCell = neighborChunk?.getTile(nl.x, nl.y);
+                if (!neighborCell) continue;
+                if (neighborCell.flagged && !neighborCell.revealed) {
+                    adjacentFlags++;
+                } else if (!neighborCell.revealed && !neighborCell.flagged) {
+                    hiddenNeighbors.push({ x: nx, y: ny, isMine: neighborCell.isMine });
+                }
+            }
+
+            if (adjacentFlags !== centerCell.adjacentMines) {
+                console.log(`Chord click at (${x},${y}) did not reveal any cells.`);
+                return;
+            }
+
+            // Check for mine hits first
+            const hitMineNeighbor = hiddenNeighbors.find(n => n.isMine);
+            if (hitMineNeighbor) {
                 player.status = PlayerStatus.LOCKED_OUT;
                 player.lockedUntil = Date.now() + gameState.scoringConfig.lockoutDurationMs;
-
-                // Update score via ScoreService (handles score calculation and update notification)
                 this.scoreService.handleMineHit(gameId, socketId, 'Hit Mine (Chord Click)');
 
-                // Persist the revealed mine state
-                this.gameStateService.updateGridCell(gameId, hitMine);
-
-                // Send updates to clients
-                // 1. Player status update
-                this.gameUpdateService.sendPlayerStatusUpdate(
-                    gameId,
-                    socketId,
-                    player.status,
-                    player.lockedUntil
-                );
-
-                // 2. Tile update for the revealed mine
-                this.gameUpdateService.sendTileUpdate(
-                    gameId,
-                    {
-                        x: hitMine.x,
-                        y: hitMine.y,
-                        revealed: true,
-                        flagged: false,
-                        isMine: true
-                    }
-                );
-
-                console.log(`Player ${socketId} hit a mine during chord click at (${x},${y}).`);
-            } else {
-                // Successful reveal case (array of cells)
-                const revealedCells: Cell[] = result;
-
-                if (revealedCells.length === 0) {
-                    // Nothing to reveal (already revealed/flagged or insufficient flags around number)
-                    console.log(`Chord click at (${x},${y}) did not reveal any cells.`);
-                    return;
+                const { chunkCoordinate: mc, localCoordinate: ml } = chunkManager.convertGlobalToChunkLocalCoordinates(hitMineNeighbor.x, hitMineNeighbor.y);
+                const mineChunk = await chunkManager.getChunk(mc.x, mc.y);
+                const mineTile = mineChunk?.getTile(ml.x, ml.y);
+                if (mineTile) {
+                    const revealedMine = { ...mineTile, revealed: true, flagged: false };
+                    mineChunk.setTile(ml.x, ml.y, revealedMine);
+                    this.gameStateService.updateGridCell(gameId, revealedMine);
                 }
 
-                // Update score via ScoreService (handles score calculation and update notification)
-                this.scoreService.handleCellReveal(gameId, socketId, revealedCells, 'Chord Click Reveal');
+                this.gameUpdateService.sendPlayerStatusUpdate(gameId, socketId, player.status, player.lockedUntil);
+                this.gameUpdateService.sendTileUpdate(gameId, {
+                    x: hitMineNeighbor.x,
+                    y: hitMineNeighbor.y,
+                    revealed: true,
+                    flagged: false,
+                    isMine: true,
+                });
+                console.log(`Player ${socketId} hit a mine during chord click at (${x},${y}).`);
+                return;
+            }
 
-                // Persist the state changes for all revealed cells
-                this.gameStateService.updateGridCells(gameId, revealedCells);
+            // Reveal all hidden non-mine neighbors via flood fill
+            const allRevealedCells: Cell[] = [];
+            for (const neighbor of hiddenNeighbors) {
+                const { revealedCells } = await this.gameStateService.runGlobalFloodFill(gameId, neighbor.x, neighbor.y, socketId);
+                allRevealedCells.push(...revealedCells);
+            }
 
-                // Send tile updates to clients
-                const tilesUpdatePayload = revealedCells.map(cell => ({
+            if (allRevealedCells.length > 0) {
+                this.scoreService.handleCellReveal(gameId, socketId, allRevealedCells, 'Chord Click Reveal');
+                this.gameUpdateService.sendTilesUpdate(gameId, allRevealedCells.map(cell => ({
                     x: cell.x,
                     y: cell.y,
                     revealed: cell.revealed,
                     flagged: cell.flagged,
-                    adjacentMines: cell.adjacentMines
-                }));
-
-                this.gameUpdateService.sendTilesUpdate(gameId, tilesUpdatePayload);
-
-                console.log(`Player ${socketId} revealed ${revealedCells.length} cells via chord click at (${x},${y}).`);
+                    adjacentMines: cell.adjacentMines,
+                })));
             }
+
+            console.log(`Player ${socketId} revealed ${allRevealedCells.length} cells via chord click at (${x},${y}).`);
         } catch (error) {
             console.error('Error performing chord click:', error);
             this.gameUpdateService.sendError(socketId, 'Failed to perform chord click');
