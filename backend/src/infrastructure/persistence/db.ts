@@ -99,8 +99,8 @@ export async function connectToDatabase(): Promise<void> {
         await leaderboardsCollection.createIndex({ category: 1, metric: 1 });
         await leaderboardsCollection.createIndex({ updatedAt: 1 });
 
-        // Chunks: 2D spatial index + recent activity index
-        await chunksCol.createIndex({ loc: '2d', gameId: 1 });
+        // Chunks: compound lookup index + recent activity index
+        await chunksCol.createIndex({ gameId: 1, chunkX: 1, chunkY: 1 }, { unique: true });
         await chunksCol.createIndex({ gameId: 1, updatedAt: -1 });
 
         // PendingFills: game lookup

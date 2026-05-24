@@ -5,7 +5,6 @@ interface UseViewportProps {
   initialCenter?: Coordinates;
   initialWidth?: number;
   initialHeight?: number;
-  initialScale?: number;
   cellSizePx?: number;
   onViewportChange?: (viewport: ViewportState) => void;
 }
@@ -20,7 +19,6 @@ interface UseViewportReturn {
   handlePanEnd: () => void;
   handleKeyboardPan: (direction: 'up' | 'down' | 'left' | 'right') => void;
   setCenterPosition: (x: number, y: number) => void;
-  setScale: (scale: number) => void;
   resizeTo: (width: number, height: number) => void;
 }
 
@@ -31,7 +29,6 @@ export function useViewport({
   initialCenter = { x: 0, y: 0 },
   initialWidth = 20,
   initialHeight = 15,
-  initialScale = 1,
   cellSizePx = 30,
   onViewportChange
 }: UseViewportProps = {}): UseViewportReturn {
@@ -40,7 +37,7 @@ export function useViewport({
     center: initialCenter,
     width: initialWidth,
     height: initialHeight,
-    scale: initialScale
+    scale: 1,
   });
 
   // Panning state
@@ -91,14 +88,6 @@ export function useViewport({
   const resizeTo = useCallback((width: number, height: number) => {
     updateViewport({ width, height });
   }, [updateViewport]);
-
-  // Change scale level
-  const setScale = useCallback((scale: number) => {
-    scale = Math.max(0.5, Math.min(scale, 3)); // Limit scale range
-    if (scale !== viewport.scale) {
-      updateViewport({ scale });
-    }
-  }, [updateViewport, viewport.scale]);
 
   // Convert world coordinates to viewport-relative coordinates
   const worldToViewportCoordinates = useCallback((worldX: number, worldY: number) => {
@@ -259,7 +248,6 @@ export function useViewport({
     handlePanEnd,
     handleKeyboardPan,
     setCenterPosition,
-    setScale,
     resizeTo,
   };
 }

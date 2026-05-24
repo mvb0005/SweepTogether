@@ -74,20 +74,33 @@ export class ChunkManager implements IChunkManager {
     const chunkId = this.getChunkId(chunkX, chunkY);
     if (this.chunks.has(chunkId)) return this.chunks.get(chunkId)!;
 
+    const t0 = performance.now();
     let mines: Uint8Array | undefined;
     let revealedIndices = new Set<number>();
     let flaggedIndices = new Set<number>();
 
     if (this.persistenceLoader) {
+      const tDb0 = performance.now();
       const data = await this.persistenceLoader(chunkX, chunkY);
+      const dbMs = (performance.now() - tDb0).toFixed(1);
       if (data) {
         mines = data.mines;
         revealedIndices = data.revealedIndices;
         flaggedIndices = data.flaggedIndices;
       }
+      const tBuild0 = performance.now();
+      const chunk = this.buildChunkFromData(chunkX, chunkY, mines, revealedIndices, flaggedIndices);
+      const buildMs = (performance.now() - tBuild0).toFixed(1);
+      const totalMs = (performance.now() - t0).toFixed(1);
+      console.log(`[chunk] load (${chunkX},${chunkY}) db=${dbMs}ms build=${buildMs}ms total=${totalMs}ms`);
+      this.chunks.set(chunkId, chunk);
+      return chunk;
     }
 
+    const tBuild0 = performance.now();
     const chunk = this.buildChunkFromData(chunkX, chunkY, mines, revealedIndices, flaggedIndices);
+    const buildMs = (performance.now() - tBuild0).toFixed(1);
+    console.log(`[chunk] generate (${chunkX},${chunkY}) build=${buildMs}ms`);
     this.chunks.set(chunkId, chunk);
     return chunk;
   }

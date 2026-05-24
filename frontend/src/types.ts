@@ -16,15 +16,18 @@ export interface Coordinates {
 }
 
 export interface ViewportState {
-  /** World center in cell coordinates (fractional for smooth pan). */
   center: { x: number; y: number };
-  /** Visible width/height in cell units. */
   width: number;
   height: number;
   scale: number;
 }
 
 export type BoardState = CellState[][];
+
+export enum PlayerStatus {
+  ACTIVE = 'active',
+  LOCKED_OUT = 'locked_out',
+}
 
 export interface Player {
   id: string;

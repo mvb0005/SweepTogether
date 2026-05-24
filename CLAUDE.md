@@ -27,7 +27,7 @@ nginx (:8080)
 
 **Backend** is event-driven (`InMemoryEventBus`) with a service layer (`src/application/`) over domain logic (`src/domain/`). The infinite world uses Simplex noise (`WorldGenerator`) for deterministic mine placement and a `SpatialHashGrid` for revealed/flagged state.
 
-**Frontend** uses a chunk-based model: the board is divided into 16×16 chunks. The client subscribes only to visible chunks via Socket.IO.
+**Frontend** uses a chunk-based model: the board is divided into 32×32 chunks. The client subscribes only to visible chunks via Socket.IO.
 
 ## Key Files
 
@@ -37,16 +37,17 @@ nginx (:8080)
 | `backend/src/infrastructure/network/socketHandlers.ts` | Socket event routing |
 | `backend/src/application/` | Service layer (game, player actions, score, leaderboard) |
 | `backend/src/domain/` | Core logic (gridLogic, worldGenerator, BoardManager, Chunk) |
-| `frontend/src/App.tsx` | Routes + socket join logic |
+| `frontend/src/App.tsx` | Routes, join session, tile actions via Socket.IO |
+| `frontend/src/hooks/useSocket.tsx` | Socket.IO connection |
+| `frontend/src/hooks/useGameSession.tsx` | `joinGame` / `gameJoined` handshake |
+| `frontend/src/hooks/useChunkSubscriptions.tsx` | Chunk subscribe/unsubscribe + live updates |
 | `frontend/src/renderer/BoardRenderer.ts` | Canvas 2D board renderer (cells, grid, chunk borders) |
-| `frontend/src/hooks/useViewport.tsx` | Viewport pan/zoom/keyboard state |
-| `frontend/src/contexts/ViewportContext.tsx` | Chunk subscription regions + pan/zoom API |
-| `frontend/src/hooks/useChunkStore.ts` | Chunk subscribe/unsubscribe + socket deltas |
-| `frontend/src/components/GameView.tsx` | Main game shell (HUD + canvas) |
+| `frontend/src/contexts/ViewportContext.tsx` | Pan/zoom + chunk subscription regions |
+| `frontend/src/components/GameView.tsx` | Game shell (HUD + canvas) |
 
 ## Known Incomplete Work
 
-- **No player validation on tile actions.** `revealTile`/`flagTile`/`chordClick` go through the event bus without verifying the player exists or is authorised.
+- **Flood fill blocks the event loop.** `runGlobalFloodFill` is synchronous BFS — a large open area stalls Socket.IO for all clients. The "SweepTogether" text creates a single large open background region that triggers a very large flood fill on first click. Needs chunked/yielded execution.
 - **Flood fill chunk-border edge case.** Isolated revealed cells can appear at chunk boundaries. The global BFS (`runGlobalFloodFill`) fixes most cases, but back-propagation into already-loaded chunks from a newly activated neighbour may still be incomplete in edge cases.
 
 ## Pregen Tools

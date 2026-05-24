@@ -2,21 +2,27 @@ import React from 'react';
 import { CHUNK_SIZE } from '../constants';
 import { useGameContext } from '../contexts/GameContext';
 import { useViewportContext } from '../contexts/ViewportContext';
-import { useChunkStore } from '../hooks/useChunkStore';
+import { useSocket } from '../hooks/useSocket';
+import { useChunkSubscriptions } from '../hooks/useChunkSubscriptions';
 import GameCanvas from './GameCanvas';
 import GameHud from './GameHud';
 
 interface GameViewProps {
   isConnected: boolean;
+  isJoined: boolean;
 }
 
-const GameView: React.FC<GameViewProps> = ({ isConnected }) => {
+const GameView: React.FC<GameViewProps> = ({ isConnected, isJoined }) => {
+  const { socket } = useSocket();
   const { gameId, isPlayerLocked } = useGameContext();
-  const { subscriptionChunks } = useViewportContext();
-  const { chunks, loadedChunkCount, isInitialLoad, error } = useChunkStore({
+  const { immediateChunks, bufferedChunks } = useViewportContext();
+  const { chunks, isLoading, error } = useChunkSubscriptions(
+    socket,
+    isConnected && isJoined,
     gameId,
-    subscribeChunks: subscriptionChunks,
-  });
+    immediateChunks,
+    bufferedChunks,
+  );
 
   if (error) {
     return <div className="game-overlay game-overlay--error">{error}</div>;
@@ -27,8 +33,8 @@ const GameView: React.FC<GameViewProps> = ({ isConnected }) => {
       <GameHud
         isConnected={isConnected}
         isPlayerLocked={isPlayerLocked}
-        loadedChunkCount={loadedChunkCount}
-        isInitialLoad={isInitialLoad}
+        loadedChunkCount={Object.keys(chunks).length}
+        isInitialLoad={isLoading}
       />
       <GameCanvas chunks={chunks} chunkSize={CHUNK_SIZE} />
     </div>

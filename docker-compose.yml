@@ -1,19 +1,16 @@
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        NODE_ENV: production
     ports:
-      - "3001:3000" # Changed host port to 3001 to avoid conflict with frontend dev server
-    volumes:
-      - ./backend:/usr/src/app # Mount backend code
-      - /usr/src/app/node_modules # Keep container's node_modules
-    command: npx nodemon --legacy-watch --watch src --ext ts --exec 'ts-node' src/server.ts
+      - "3001:3000"
     environment:
-      - NODE_ENV=development
-      # Updated MongoDB connection string
+      - NODE_ENV=production
       - MONGODB_URI=mongodb://mongo_user:mongo_password@mongo:27017/minesweeper_infinite?authSource=admin
       - DB_NAME=minesweeper_infinite
     depends_on:
-      # Changed dependency from db to mongo
       - mongo
     networks:
       - minesweeper-net
@@ -88,6 +85,17 @@ services:
       - "27017:27017" # Expose MongoDB port
     networks:
       - minesweeper-net
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - nginx
+    networks:
+      - minesweeper-net
+    restart: unless-stopped
 
   cypress:
     build:

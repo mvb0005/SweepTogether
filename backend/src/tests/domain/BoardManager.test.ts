@@ -37,14 +37,14 @@ describe('ChunkManager', () => {
   describe('convertGlobalToChunkCoordinates', () => {
     it('should convert global coordinates to chunk coordinates correctly', () => {
       expect(chunkManager.convertGlobalToChunkCoordinates(0, 0)).toEqual({ x: 0, y: 0 });
-      expect(chunkManager.convertGlobalToChunkCoordinates(15, 15)).toEqual({ x: 0, y: 0 });
-      expect(chunkManager.convertGlobalToChunkCoordinates(16, 0)).toEqual({ x: 1, y: 0 });
-      expect(chunkManager.convertGlobalToChunkCoordinates(0, 16)).toEqual({ x: 0, y: 1 });
-      expect(chunkManager.convertGlobalToChunkCoordinates(31, 31)).toEqual({ x: 1, y: 1 });
-      expect(chunkManager.convertGlobalToChunkCoordinates(32, 32)).toEqual({ x: 2, y: 2 });
+      expect(chunkManager.convertGlobalToChunkCoordinates(31, 31)).toEqual({ x: 0, y: 0 }); // last cell of chunk 0
+      expect(chunkManager.convertGlobalToChunkCoordinates(32, 0)).toEqual({ x: 1, y: 0 }); // first cell of chunk 1
+      expect(chunkManager.convertGlobalToChunkCoordinates(0, 32)).toEqual({ x: 0, y: 1 });
+      expect(chunkManager.convertGlobalToChunkCoordinates(63, 63)).toEqual({ x: 1, y: 1 });
+      expect(chunkManager.convertGlobalToChunkCoordinates(64, 64)).toEqual({ x: 2, y: 2 });
       expect(chunkManager.convertGlobalToChunkCoordinates(-1, -1)).toEqual({ x: -1, y: -1 });
-      expect(chunkManager.convertGlobalToChunkCoordinates(-16, -16)).toEqual({ x: -1, y: -1 });
-      expect(chunkManager.convertGlobalToChunkCoordinates(-17, -17)).toEqual({ x: -2, y: -2 });
+      expect(chunkManager.convertGlobalToChunkCoordinates(-32, -32)).toEqual({ x: -1, y: -1 }); // first cell of chunk -1
+      expect(chunkManager.convertGlobalToChunkCoordinates(-33, -33)).toEqual({ x: -2, y: -2 });
     });
   });
 
@@ -54,33 +54,33 @@ describe('ChunkManager', () => {
         chunkCoordinate: { x: 0, y: 0 },
         localCoordinate: { x: 0, y: 0 },
       });
-      expect(chunkManager.convertGlobalToChunkLocalCoordinates(15, 15)).toEqual({
+      expect(chunkManager.convertGlobalToChunkLocalCoordinates(31, 31)).toEqual({
         chunkCoordinate: { x: 0, y: 0 },
-        localCoordinate: { x: 15, y: 15 },
+        localCoordinate: { x: 31, y: 31 },
       });
-      expect(chunkManager.convertGlobalToChunkLocalCoordinates(16, 0)).toEqual({
+      expect(chunkManager.convertGlobalToChunkLocalCoordinates(32, 0)).toEqual({
         chunkCoordinate: { x: 1, y: 0 },
         localCoordinate: { x: 0, y: 0 },
       });
-      expect(chunkManager.convertGlobalToChunkLocalCoordinates(31, 15)).toEqual({
+      expect(chunkManager.convertGlobalToChunkLocalCoordinates(63, 31)).toEqual({
         chunkCoordinate: { x: 1, y: 0 },
-        localCoordinate: { x: 15, y: 15 },
+        localCoordinate: { x: 31, y: 31 },
       });
-      expect(chunkManager.convertGlobalToChunkLocalCoordinates(0, 16)).toEqual({
+      expect(chunkManager.convertGlobalToChunkLocalCoordinates(0, 32)).toEqual({
         chunkCoordinate: { x: 0, y: 1 },
         localCoordinate: { x: 0, y: 0 },
       });
       expect(chunkManager.convertGlobalToChunkLocalCoordinates(-1, -1)).toEqual({
         chunkCoordinate: { x: -1, y: -1 },
-        localCoordinate: { x: 15, y: 15 },
+        localCoordinate: { x: 31, y: 31 },
       });
-      expect(chunkManager.convertGlobalToChunkLocalCoordinates(-16, -16)).toEqual({
+      expect(chunkManager.convertGlobalToChunkLocalCoordinates(-32, -32)).toEqual({
         chunkCoordinate: { x: -1, y: -1 },
         localCoordinate: { x: 0, y: 0 },
       });
-      expect(chunkManager.convertGlobalToChunkLocalCoordinates(-17, -17)).toEqual({
+      expect(chunkManager.convertGlobalToChunkLocalCoordinates(-33, -33)).toEqual({
         chunkCoordinate: { x: -2, y: -2 },
-        localCoordinate: { x: 15, y: 15 },
+        localCoordinate: { x: 31, y: 31 },
       });
     });
   });
@@ -88,11 +88,11 @@ describe('ChunkManager', () => {
   describe('convertChunkLocalToGlobalCoordinates', () => {
     it('should convert chunk and local coordinates to global coordinates correctly', () => {
       expect(chunkManager.convertChunkLocalToGlobalCoordinates(0, 0, 0, 0)).toEqual({ x: 0, y: 0 });
-      expect(chunkManager.convertChunkLocalToGlobalCoordinates(0, 0, 15, 15)).toEqual({ x: 15, y: 15 });
-      expect(chunkManager.convertChunkLocalToGlobalCoordinates(1, 0, 0, 0)).toEqual({ x: 16, y: 0 });
-      expect(chunkManager.convertChunkLocalToGlobalCoordinates(1, 0, 15, 15)).toEqual({ x: 31, y: 15 });
-      expect(chunkManager.convertChunkLocalToGlobalCoordinates(-1, -1, 0, 0)).toEqual({ x: -16, y: -16 });
-      expect(chunkManager.convertChunkLocalToGlobalCoordinates(-1, -1, 15, 15)).toEqual({ x: -1, y: -1 });
+      expect(chunkManager.convertChunkLocalToGlobalCoordinates(0, 0, 31, 31)).toEqual({ x: 31, y: 31 });
+      expect(chunkManager.convertChunkLocalToGlobalCoordinates(1, 0, 0, 0)).toEqual({ x: 32, y: 0 });
+      expect(chunkManager.convertChunkLocalToGlobalCoordinates(1, 0, 31, 31)).toEqual({ x: 63, y: 31 });
+      expect(chunkManager.convertChunkLocalToGlobalCoordinates(-1, -1, 0, 0)).toEqual({ x: -32, y: -32 });
+      expect(chunkManager.convertChunkLocalToGlobalCoordinates(-1, -1, 31, 31)).toEqual({ x: -1, y: -1 });
     });
   });
 

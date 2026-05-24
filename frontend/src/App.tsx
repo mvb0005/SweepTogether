@@ -1,60 +1,58 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { SocketProvider, useSocket } from './hooks/useSocket';
+import { useGameSession } from './hooks/useGameSession';
 import { ViewportProvider } from './contexts/ViewportContext';
 import { GameProvider } from './contexts/GameContext';
 import GameView from './components/GameView';
 import { CHUNK_SIZE } from './constants';
+import { PlayerStatus } from './types';
 
-function getOrCreatePlayerId(): string {
-  const key = 'sweeptogether_player_id';
-  let id = localStorage.getItem(key);
-  if (!id) {
-    id = `player_${Math.random().toString(36).slice(2, 10)}`;
-    localStorage.setItem(key, id);
-  }
-  return id;
-}
+const GAME_ID = 'default';
+const params = new URLSearchParams(window.location.search);
+const USERNAME = params.get('playerId') || params.get('username') || 'Anonymous';
 
 const AppContent: React.FC = () => {
-  const { send, isConnected, on, off } = useSocket();
+  const { socket, isConnected } = useSocket();
+  const { playerId, isJoined } = useGameSession(socket, isConnected, GAME_ID, USERNAME);
   const [isPlayerLocked, setIsPlayerLocked] = useState(false);
-  const playerId = useRef(getOrCreatePlayerId()).current;
 
   useEffect(() => {
-    if (!isConnected) return;
-    send({ type: 'join', playerId });
-  }, [isConnected, send, playerId]);
+    if (!socket || !playerId) return;
 
-  useEffect(() => {
-    if (!isConnected) return;
-    const handleMineHit = () => setIsPlayerLocked(true);
-    on('mineHit', handleMineHit);
-    return () => off('mineHit', handleMineHit);
-  }, [isConnected, on, off]);
+    const handleStatus = (data: { playerId: string; status: string }) => {
+      if (data.playerId !== playerId) return;
+      setIsPlayerLocked(data.status === PlayerStatus.LOCKED_OUT);
+    };
+
+    socket.on('playerStatusUpdate', handleStatus);
+    return () => {
+      socket.off('playerStatusUpdate', handleStatus);
+    };
+  }, [socket, playerId]);
 
   const handleRevealCell = useCallback(
     (x: number, y: number) => {
-      if (!isConnected || isPlayerLocked) return;
-      send({ type: 'reveal', worldX: x, worldY: y });
+      if (!socket || !isConnected || !isJoined || !playerId || isPlayerLocked) return;
+      socket.emit('revealTile', { gameId: GAME_ID, playerId, x, y });
     },
-    [isConnected, isPlayerLocked, send],
+    [socket, isConnected, isJoined, playerId, isPlayerLocked],
   );
 
   const handleFlagCell = useCallback(
     (x: number, y: number) => {
-      if (!isConnected || isPlayerLocked) return;
-      send({ type: 'flag', worldX: x, worldY: y });
+      if (!socket || !isConnected || !isJoined || !playerId || isPlayerLocked) return;
+      socket.emit('flagTile', { gameId: GAME_ID, playerId, x, y });
     },
-    [isConnected, isPlayerLocked, send],
+    [socket, isConnected, isJoined, playerId, isPlayerLocked],
   );
 
   const handleChordCell = useCallback(
     (x: number, y: number) => {
-      if (!isConnected || isPlayerLocked) return;
-      send({ type: 'chord', worldX: x, worldY: y });
+      if (!socket || !isConnected || !isJoined || !playerId || isPlayerLocked) return;
+      socket.emit('chordClick', { gameId: GAME_ID, playerId, x, y });
     },
-    [isConnected, isPlayerLocked, send],
+    [socket, isConnected, isJoined, playerId, isPlayerLocked],
   );
 
   if (!isConnected) {
@@ -69,14 +67,15 @@ const AppContent: React.FC = () => {
           element={
             <div className="game-container">
               <GameProvider
-                gameId="default"
+                gameId={GAME_ID}
+                playerId={playerId}
                 isPlayerLocked={isPlayerLocked}
                 onRevealCell={handleRevealCell}
                 onFlagCell={handleFlagCell}
                 onChordCell={handleChordCell}
               >
                 <ViewportProvider chunkSize={CHUNK_SIZE}>
-                  <GameView isConnected={isConnected} />
+                  <GameView isConnected={isConnected} isJoined={isJoined} />
                 </ViewportProvider>
               </GameProvider>
             </div>

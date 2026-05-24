@@ -3,7 +3,6 @@ import React, {
   useCallback,
   useContext,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -22,7 +21,10 @@ export interface ViewportContextValue {
   viewport: ViewportState;
   scale: number;
   cellPx: number;
-  subscriptionChunks: ChunkCoords[];
+  /** Chunks in the visible viewport — subscribe immediately. */
+  immediateChunks: ChunkCoords[];
+  /** Visible + buffer — subscribe after debounce; drives unsubscribe sync. */
+  bufferedChunks: ChunkCoords[];
   onPanStart: (clientX: number, clientY: number) => void;
   onPanMove: (clientX: number, clientY: number) => void;
   onPanEnd: () => void;
@@ -77,20 +79,6 @@ function getBufferedChunks(
   return chunks;
 }
 
-function mergeChunkLists(...lists: ChunkCoords[][]): ChunkCoords[] {
-  const seen = new Set<string>();
-  const out: ChunkCoords[] = [];
-  for (const list of lists) {
-    for (const c of list) {
-      const k = `${c.x}_${c.y}`;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(c);
-    }
-  }
-  return out;
-}
-
 export const ViewportProvider: React.FC<ViewportProviderProps> = ({
   chunkSize,
   initialCenter,
@@ -138,32 +126,23 @@ export const ViewportProvider: React.FC<ViewportProviderProps> = ({
     prevCenterRef.current = viewport.center;
   }
 
-  const visibleChunks = getVisibleChunks(viewport, chunkSize);
+  const immediateChunks = getVisibleChunks(viewport, chunkSize);
   const bufferedChunks = getBufferedChunks(viewport, chunkSize, panDirRef.current);
-  const visibleKey = visibleChunks.map(c => `${c.x}_${c.y}`).join('|');
   const bufferKey = bufferedChunks.map(c => `${c.x}_${c.y}`).join('|');
-  const [debouncedBuffer, setDebouncedBuffer] = useState(bufferedChunks);
-  const [debouncedBufferKey, setDebouncedBufferKey] = useState(bufferKey);
+  const [debouncedBuffered, setDebouncedBuffered] = useState(bufferedChunks);
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setDebouncedBuffer(bufferedChunks);
-      setDebouncedBufferKey(bufferKey);
-    }, CHUNK_SUBSCRIBE_DEBOUNCE_MS);
+    const t = setTimeout(() => setDebouncedBuffered(bufferedChunks), CHUNK_SUBSCRIBE_DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [bufferKey, bufferedChunks]);
-
-  const subscriptionChunks = useMemo(
-    () => mergeChunkLists(visibleChunks, debouncedBuffer),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [visibleKey, debouncedBufferKey],
-  );
+  }, [bufferKey]);
 
   const value: ViewportContextValue = {
     viewport,
     scale,
     cellPx,
-    subscriptionChunks,
+    immediateChunks,
+    bufferedChunks: debouncedBuffered,
     onPanStart: handlePanStart,
     onPanMove: handlePanMove,
     onPanEnd: handlePanEnd,

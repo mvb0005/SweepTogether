@@ -6,7 +6,7 @@ import { IChunkManager, CHUNK_SIZE } from '../../types/chunkTypes';
 import { SpatialHashGrid } from '../../domain/spatialHashGrid';
 
 jest.mock('../../infrastructure/persistence/db', () => ({
-    getGameRepository: () => ({ createOrLoad: jest.fn().mockResolvedValue(12345) }),
+    getGameRepository: () => ({ createOrLoad: jest.fn().mockResolvedValue('12345') }),
     getChunkRepository: () => ({
         ensure: jest.fn().mockResolvedValue(undefined),
         getOrAddPlayerIndex: jest.fn().mockResolvedValue(0),

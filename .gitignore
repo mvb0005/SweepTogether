@@ -138,3 +138,4 @@ reports/
 
 # Cloudflare Wrangler configuration and build output
 **/.wrangler
+.wrangler/
