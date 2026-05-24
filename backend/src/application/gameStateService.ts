@@ -6,6 +6,7 @@
  * and potentially board chunks for infinite worlds.
  */
 
+import path from 'path';
 import { GameState, Cell, Coordinates, PointData, GameConfig, PlayerStatus } from '../domain/types';
 import { SpatialHashGrid } from '../domain/spatialHashGrid';
 import { WorldGenerator } from '../domain/worldGenerator';
@@ -16,6 +17,21 @@ import { Server as SocketIOServer } from 'socket.io';
 import { IChunk } from '../types/chunkTypes';
 import { getGameRepository, getChunkRepository, getPendingFillsRepository } from '../infrastructure/persistence/db';
 import { ChunkRepository } from '../infrastructure/persistence/chunkRepository';
+
+// Load the Rust native chunk generator if available. Falls back gracefully to
+// the JS WorldGenerator so development without a compiled addon still works.
+type NativeGenerateFn = (chunkX: number, chunkY: number, chunkSize: number, seed: string) => Buffer;
+type NativeBatchFn = (coords: number[][], chunkSize: number, seed: string) => Buffer[];
+interface NativeAddon { generateChunk: NativeGenerateFn; generateChunksBatch: NativeBatchFn; }
+let nativeAddon: NativeAddon | null = null;
+try {
+    const nativePath = path.join(__dirname, '../../native/index.node');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    nativeAddon = require(nativePath) as NativeAddon;
+    console.log('[GameStateService] Rust native chunk generator loaded');
+} catch {
+    console.warn('[GameStateService] Rust native chunk generator not found — falling back to JS noise');
+}
 
 // Define a reasonable cell size for the spatial hash grid chunks
 const SPATIAL_GRID_CELL_SIZE = 16;
@@ -55,7 +71,8 @@ export class GameStateService {
     private games: Map<string, GameState> = new Map();
     // Use a Map to store WorldGenerator instances per gameId (seed)
     private worldGenerators: Map<string, WorldGenerator> = new Map();
-    private chunkManagers: Map<string, IChunkManager> = new Map(); // Renamed for ChunkManager instances
+    private gameSeeds: Map<string, string> = new Map();
+    private chunkManagers: Map<string, IChunkManager> = new Map();
     private io?: SocketIOServer;
 
     // Per-game flood fill queue: points that arrived while a fill was running
@@ -243,6 +260,7 @@ export class GameStateService {
 
         // Load or generate a persistent seed for this game
         const seedStr = await getGameRepository().createOrLoad(gameId, config);
+        this.gameSeeds.set(gameId, seedStr);
         const newGame: GameState = {
             gameId,
             boardConfig: config,
@@ -326,7 +344,11 @@ export class GameStateService {
                 ...ChunkRepository.decode(doc),
             };
         };
-        const chunkManager = new ChunkManager(gameId, CHUNK_SIZE, cellGenerator, hasActiveSubscribers, processAndBroadcastChunk, broadcastChunkUpdate, persistenceLoader);
+        const chunkMineGenerator = nativeAddon
+            ? (chunkX: number, chunkY: number): Uint8Array =>
+                nativeAddon!.generateChunk(chunkX, chunkY, CHUNK_SIZE, seedStr)
+            : undefined;
+        const chunkManager = new ChunkManager(gameId, CHUNK_SIZE, cellGenerator, hasActiveSubscribers, processAndBroadcastChunk, broadcastChunkUpdate, persistenceLoader, chunkMineGenerator);
         this.chunkManagers.set(gameId, chunkManager);
 
         // Restore persisted pendingFills so cross-chunk flood fills survive restarts
@@ -408,21 +430,51 @@ export class GameStateService {
         const docsMap = await getChunkRepository().loadMany(gameId, uncached);
         const dbMs = (performance.now() - t0).toFixed(1);
 
-        // Build and deliver one chunk at a time, yielding between each so the
-        // event loop remains responsive to other clients during a large pan.
+        // Separate into chunks with DB data (load as-is) and fresh chunks (need generation).
+        const needGeneration: { chunkX: number; chunkY: number }[] = [];
+        for (const coord of uncached) {
+            if (!docsMap.has(`${gameId}_${coord.chunkX}_${coord.chunkY}`)) {
+                needGeneration.push(coord);
+            }
+        }
+
+        // Generate all fresh chunks in parallel across CPU cores via Rust/Rayon.
+        // One native call replaces N sequential calls, completing in time of the slowest core.
+        const seed = this.gameSeeds.get(gameId) ?? gameId;
+        const tGen = performance.now();
+        const generatedMap = new Map<string, Uint8Array>();
+        if (needGeneration.length > 0 && nativeAddon) {
+            const batchResults = nativeAddon.generateChunksBatch(
+                needGeneration.map(c => [c.chunkX, c.chunkY]),
+                CHUNK_SIZE,
+                seed,
+            );
+            needGeneration.forEach((c, i) => {
+                generatedMap.set(`${c.chunkX}_${c.chunkY}`, batchResults[i]);
+            });
+        }
+        const genMs = (performance.now() - tGen).toFixed(1);
+
+        // Stream chunks to the client. Yield every 20 chunks to keep the event
+        // loop available for other clients — generation is already done above.
         let built = 0;
-        for (const { chunkX, chunkY } of uncached) {
+        for (let i = 0; i < uncached.length; i++) {
+            const { chunkX, chunkY } = uncached[i];
             const doc = docsMap.get(`${gameId}_${chunkX}_${chunkY}`);
-            const mines = doc ? ChunkRepository.decodeMines(doc) : undefined;
+            const mines = doc
+                ? ChunkRepository.decodeMines(doc)
+                : generatedMap.get(`${chunkX}_${chunkY}`);
             const { revealedIndices, flaggedIndices } = doc
                 ? ChunkRepository.decode(doc)
                 : { revealedIndices: new Set<number>(), flaggedIndices: new Set<number>() };
             await chunkManager.preloadMany([{ chunkX, chunkY, mines, revealedIndices, flaggedIndices }]);
             onChunk(chunkManager.getChunkById(chunkManager.getChunkId(chunkX, chunkY))!);
             built++;
-            await new Promise<void>(resolve => setImmediate(resolve));
+            if (i % 20 === 19) await new Promise<void>(resolve => setImmediate(resolve));
         }
-        console.log(`[streamChunks] cached=${coords.length - uncached.length} built=${built} db=${dbMs}ms`);
+        // Final yield if the last batch wasn't a multiple of 20.
+        await new Promise<void>(resolve => setImmediate(resolve));
+        console.log(`[streamChunks] cached=${coords.length - uncached.length} built=${built} gen=${genMs}ms db=${dbMs}ms`);
     }
 
     /**
@@ -500,7 +552,7 @@ export class GameStateService {
         while (queue.length > 0) {
             // Yield every 500 steps so the event loop can handle other requests
             // during large flood fills (e.g. the SweepTogether open region).
-            if (++steps % 500 === 0) await new Promise<void>(r => setImmediate(r));
+            if (++steps % 2000 === 0) await new Promise<void>(r => setImmediate(r));
 
             const { x, y } = queue.shift()!;
             const { chunkCoordinate: cc, localCoordinate: lc } = chunkManager.convertGlobalToChunkLocalCoordinates(x, y);

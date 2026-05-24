@@ -17,21 +17,8 @@ services:
 
   frontend:
     build: ./frontend
-    # Override command to run Vite dev server and expose it
-    command: ["npm", "run", "dev", "--", "--host"]
-    volumes:
-      - ./frontend:/app # Mount local code for HMR
-      - /app/node_modules # Keep container's node_modules separate
-    # Expose Vite's port (defined in vite.config.js)
     ports:
-      - "3000:3000"
-    # Remove Nginx healthcheck - Vite dev server runs instead
-    # healthcheck:
-    #   test: ["CMD", "curl", "-f", "http://localhost:80"]
-    #   interval: 10s
-    #   timeout: 5s
-    #   retries: 5
-    #   start_period: 15s
+      - "3000:80"
     networks:
       - minesweeper-net
 

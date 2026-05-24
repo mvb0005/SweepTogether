@@ -2,8 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Socket } from 'socket.io-client';
 import { Chunk, ChunkMap, Coordinates } from '../types';
 
-const BUFFER_DEBOUNCE_MS = 300;
-
 interface UseChunkSubscriptionsResult {
   chunks: ChunkMap;
   isLoading: boolean;
@@ -25,7 +23,7 @@ export function useChunkSubscriptions(
   const immediateChunksRef = useRef<Coordinates[]>(immediateChunks);
   immediateChunksRef.current = immediateChunks;
 
-  const [debouncedBuffered, setDebouncedBuffered] = useState<Coordinates[]>(bufferedChunks);
+  // bufferedChunks is already debounced by ViewportContext — no second debounce needed.
 
   // Batch live chunkData updates via rAF to avoid per-cell state thrashing.
   const pendingLiveRef = useRef<Map<string, Chunk>>(new Map());
@@ -50,12 +48,6 @@ export function useChunkSubscriptions(
       flushLiveUpdates();
     });
   }, [flushLiveUpdates]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedBuffered(bufferedChunks), BUFFER_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(bufferedChunks)]);
 
   // Stable data listeners — survive pan/zoom re-renders.
   useEffect(() => {
@@ -186,10 +178,10 @@ export function useChunkSubscriptions(
   // After debounce, sync the full buffer set.
   useEffect(() => {
     if (!socket || !isConnected || !gameId) return;
-    const keys = new Set(debouncedBuffered.map(c => `${c.x}_${c.y}`));
-    syncSubscriptions(keys, debouncedBuffered);
+    const keys = new Set(bufferedChunks.map(c => `${c.x}_${c.y}`));
+    syncSubscriptions(keys, bufferedChunks);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, isConnected, gameId, JSON.stringify(debouncedBuffered)]);
+  }, [socket, isConnected, gameId, JSON.stringify(bufferedChunks)]);
 
   // Unsubscribe everything on unmount.
   useEffect(() => {

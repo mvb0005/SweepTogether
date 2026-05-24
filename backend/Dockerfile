@@ -1,29 +1,34 @@
-# Use an official Node.js runtime as a parent image
+# Stage 1: Build the Rust native chunk generator.
+# rust:alpine targets musl, matching the Node Alpine image so the .so is ABI-compatible.
+FROM rust:alpine AS native-builder
+RUN apk add --no-cache musl-dev
+WORKDIR /build
+COPY native/ .
+# -C target-feature=-crt-static: don't statically link libc into the cdylib
+# so Node can dlopen it at runtime on musl.
+ENV RUSTFLAGS="-C target-feature=-crt-static"
+RUN cargo build --release
+
+# Stage 2: Node.js application.
 FROM node:18-alpine3.18
 
-# Set the working directory in the container
 WORKDIR /usr/src/app
 
-# Add build argument for NODE_ENV, default to production
 ARG NODE_ENV=development
 ENV NODE_ENV=${NODE_ENV}
 
-# Copy package.json and package-lock.json (if available)
 COPY package*.json ./
-
-# Install all dependencies (including devDeps needed for tsc)
 RUN npm install --include=dev
 
-# Bundle app source
 COPY . .
 
-# Build TypeScript and prune devDeps in production
+# Install the compiled native addon. Renamed to index.node — Node loads it via require().
+COPY --from=native-builder /build/target/release/libsweeptogether_native.so ./native/index.node
+
 RUN if [ "$NODE_ENV" = "production" ]; then \
       npm run build && npm prune --production; \
     fi
 
-# Make port 3000 available
 EXPOSE 3000
 
 CMD ["npm", "start"]
-

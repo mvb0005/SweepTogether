@@ -139,3 +139,6 @@ reports/
 # Cloudflare Wrangler configuration and build output
 **/.wrangler
 .wrangler/
+
+# Rust native addon build artifacts
+backend/native/target/

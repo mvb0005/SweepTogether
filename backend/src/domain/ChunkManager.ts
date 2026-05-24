@@ -5,7 +5,8 @@ import { Cell, Coordinates } from './types'; // Assuming Cell is in domain/types
 export class ChunkManager implements IChunkManager {
   public chunks: Map<string, IChunk>;
   public readonly chunkSize: number;
-  private worldGenerator: (globalX: number, globalY: number) => Cell; // To generate cells for new chunks
+  private worldGenerator: (globalX: number, globalY: number) => Cell;
+  private chunkMineGenerator?: (chunkX: number, chunkY: number) => Uint8Array;
   public hasActiveSubscribers: (gameId: string, chunkX: number, chunkY: number) => boolean;
   public processAndBroadcastChunk: (gameId: string, chunkX: number, chunkY: number) => Promise<void>;
   public gameId: string;
@@ -20,7 +21,8 @@ export class ChunkManager implements IChunkManager {
     hasActiveSubscribers?: (gameId: string, chunkX: number, chunkY: number) => boolean,
     processAndBroadcastChunk?: (gameId: string, chunkX: number, chunkY: number) => Promise<void>,
     broadcastChunkUpdate?: (chunk: IChunk) => void,
-    persistenceLoader?: ChunkPersistenceLoader
+    persistenceLoader?: ChunkPersistenceLoader,
+    chunkMineGenerator?: (chunkX: number, chunkY: number) => Uint8Array,
   ) {
     this.chunks = new Map<string, IChunk>();
     this.chunkSize = chunkSize;
@@ -36,11 +38,9 @@ export class ChunkManager implements IChunkManager {
     }));
     this.hasActiveSubscribers = hasActiveSubscribers || (() => false);
     this.processAndBroadcastChunk = processAndBroadcastChunk || (async () => {});
-    this.broadcastChunkUpdate = broadcastChunkUpdate || ((chunk) => {
-      // Placeholder: wire this up to the socket layer to emit to the chunk's room
-      // e.g., io.to(room).emit('chunkData', ...)
-    });
+    this.broadcastChunkUpdate = broadcastChunkUpdate || (() => {});
     this.persistenceLoader = persistenceLoader;
+    this.chunkMineGenerator = chunkMineGenerator;
   }
 
   public getChunkId(chunkX: number, chunkY: number): string {
@@ -54,7 +54,9 @@ export class ChunkManager implements IChunkManager {
     revealedIndices: Set<number> = new Set(),
     flaggedIndices: Set<number> = new Set()
   ): IChunk {
-    const chunk = new Chunk(chunkX, chunkY, this.chunkSize, this.worldGenerator, mines, this.broadcastChunkUpdate);
+    // Prefer the fast Rust chunk generator over the per-cell JS noise fallback.
+    const resolvedMines = mines ?? this.chunkMineGenerator?.(chunkX, chunkY);
+    const chunk = new Chunk(chunkX, chunkY, this.chunkSize, this.worldGenerator, resolvedMines, this.broadcastChunkUpdate);
     for (const idx of revealedIndices) {
       const lx = idx % this.chunkSize;
       const ly = Math.floor(idx / this.chunkSize);

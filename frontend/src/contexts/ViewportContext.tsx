@@ -11,7 +11,6 @@ import {
   BASE_CELL_PX,
   CHUNK_BUFFER,
   CHUNK_DIRECTION_EXTRA,
-  CHUNK_SUBSCRIBE_DEBOUNCE_MS,
   MAX_SCALE,
   MIN_SCALE,
 } from '../constants';
@@ -134,21 +133,13 @@ export const ViewportProvider: React.FC<ViewportProviderProps> = ({
 
   const immediateChunks = getVisibleChunks(viewport, chunkSize);
   const bufferedChunks = getBufferedChunks(viewport, chunkSize, panDirRef.current);
-  const bufferKey = bufferedChunks.map(c => `${c.x}_${c.y}`).join('|');
-  const [debouncedBuffered, setDebouncedBuffered] = useState(bufferedChunks);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedBuffered(bufferedChunks), CHUNK_SUBSCRIBE_DEBOUNCE_MS);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bufferKey]);
 
   const value: ViewportContextValue = {
     viewport,
     scale,
     cellPx,
     immediateChunks,
-    bufferedChunks: debouncedBuffered,
+    bufferedChunks,
     onPanStart: handlePanStart,
     onPanMove: handlePanMove,
     onPanEnd: handlePanEnd,

@@ -6,7 +6,6 @@ export const BASE_CELL_PX = 28;
 
 export const CHUNK_BUFFER = 8;
 export const CHUNK_DIRECTION_EXTRA = 2;
-export const CHUNK_SUBSCRIBE_DEBOUNCE_MS = 300;
 
 export const MIN_SCALE = 0.25;
 export const MAX_SCALE = 4;
