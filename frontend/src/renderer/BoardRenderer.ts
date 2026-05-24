@@ -1,3 +1,4 @@
+import { getViewportChunkBounds } from '../viewportChunks';
 import { Chunk, ChunkMap } from '../types';
 import { ViewportState } from '../types';
 import { viewportWorldOrigin } from './coordinates';
@@ -75,13 +76,16 @@ export class BoardRenderer {
     ctx.fillStyle = THEME.void;
     ctx.fillRect(0, 0, logW, logH);
 
+    const chunkPx = chunkSize * cellPx;
+    const { minX, maxX, minY, maxY } = getViewportChunkBounds(viewport, chunkSize);
     ctx.fillStyle = THEME.covered;
-    for (const chunk of Object.values(chunks)) {
-      const chunkPx = chunkSize * cellPx;
-      const sx = (chunk.coords.x * chunkSize - worldLeft) * cellPx;
-      const sy = (chunk.coords.y * chunkSize - worldTop) * cellPx;
-      if (sx + chunkPx < 0 || sx > logW || sy + chunkPx < 0 || sy > logH) continue;
-      ctx.fillRect(sx, sy, chunkPx, chunkPx);
+    for (let cx = minX; cx <= maxX; cx++) {
+      for (let cy = minY; cy <= maxY; cy++) {
+        const sx = (cx * chunkSize - worldLeft) * cellPx;
+        const sy = (cy * chunkSize - worldTop) * cellPx;
+        if (sx + chunkPx < 0 || sx > logW || sy + chunkPx < 0 || sy > logH) continue;
+        ctx.fillRect(sx, sy, chunkPx, chunkPx);
+      }
     }
 
     if (cellPx >= 4) {

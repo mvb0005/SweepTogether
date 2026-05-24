@@ -9,21 +9,17 @@ import React, {
 import { useViewport } from '../hooks/useViewport';
 import {
   BASE_CELL_PX,
-  CHUNK_BUFFER,
-  CHUNK_DIRECTION_EXTRA,
-  CHUNK_SUBSCRIBE_DEBOUNCE_MS,
   MAX_SCALE,
   MIN_SCALE,
 } from '../constants';
 import { ChunkCoords, Coordinates, ViewportState } from '../types';
+import { getBufferedChunks, getVisibleChunks } from '../viewportChunks';
 
 export interface ViewportContextValue {
   viewport: ViewportState;
   scale: number;
   cellPx: number;
-  /** Chunks in the visible viewport — subscribe immediately. */
   immediateChunks: ChunkCoords[];
-  /** Visible + buffer — subscribe after debounce; drives unsubscribe sync. */
   bufferedChunks: ChunkCoords[];
   onPanStart: (clientX: number, clientY: number) => void;
   onPanMove: (clientX: number, clientY: number) => void;
@@ -39,44 +35,6 @@ interface ViewportProviderProps {
   chunkSize: number;
   initialCenter?: Coordinates;
   children: React.ReactNode;
-}
-
-function getVisibleChunks(viewport: ViewportState, chunkSize: number): ChunkCoords[] {
-  const minX = Math.floor((viewport.center.x - viewport.width / 2) / chunkSize);
-  const maxX = Math.floor((viewport.center.x + viewport.width / 2) / chunkSize);
-  const minY = Math.floor((viewport.center.y - viewport.height / 2) / chunkSize);
-  const maxY = Math.floor((viewport.center.y + viewport.height / 2) / chunkSize);
-  const chunks: ChunkCoords[] = [];
-  for (let cx = minX; cx <= maxX; cx++) {
-    for (let cy = minY; cy <= maxY; cy++) {
-      chunks.push({ x: cx, y: cy });
-    }
-  }
-  return chunks;
-}
-
-function getBufferedChunks(
-  viewport: ViewportState,
-  chunkSize: number,
-  panDir: { dx: number; dy: number },
-): ChunkCoords[] {
-  const minX = Math.floor((viewport.center.x - viewport.width / 2) / chunkSize);
-  const maxX = Math.floor((viewport.center.x + viewport.width / 2) / chunkSize);
-  const minY = Math.floor((viewport.center.y - viewport.height / 2) / chunkSize);
-  const maxY = Math.floor((viewport.center.y + viewport.height / 2) / chunkSize);
-
-  const bufMinX = minX - CHUNK_BUFFER - (panDir.dx < 0 ? CHUNK_DIRECTION_EXTRA : 0);
-  const bufMaxX = maxX + CHUNK_BUFFER + (panDir.dx > 0 ? CHUNK_DIRECTION_EXTRA : 0);
-  const bufMinY = minY - CHUNK_BUFFER - (panDir.dy < 0 ? CHUNK_DIRECTION_EXTRA : 0);
-  const bufMaxY = maxY + CHUNK_BUFFER + (panDir.dy > 0 ? CHUNK_DIRECTION_EXTRA : 0);
-
-  const chunks: ChunkCoords[] = [];
-  for (let cx = bufMinX; cx <= bufMaxX; cx++) {
-    for (let cy = bufMinY; cy <= bufMaxY; cy++) {
-      chunks.push({ x: cx, y: cy });
-    }
-  }
-  return chunks;
 }
 
 export const ViewportProvider: React.FC<ViewportProviderProps> = ({
@@ -128,21 +86,13 @@ export const ViewportProvider: React.FC<ViewportProviderProps> = ({
 
   const immediateChunks = getVisibleChunks(viewport, chunkSize);
   const bufferedChunks = getBufferedChunks(viewport, chunkSize, panDirRef.current);
-  const bufferKey = bufferedChunks.map(c => `${c.x}_${c.y}`).join('|');
-  const [debouncedBuffered, setDebouncedBuffered] = useState(bufferedChunks);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedBuffered(bufferedChunks), CHUNK_SUBSCRIBE_DEBOUNCE_MS);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bufferKey]);
 
   const value: ViewportContextValue = {
     viewport,
     scale,
     cellPx,
     immediateChunks,
-    bufferedChunks: debouncedBuffered,
+    bufferedChunks,
     onPanStart: handlePanStart,
     onPanMove: handlePanMove,
     onPanEnd: handlePanEnd,
