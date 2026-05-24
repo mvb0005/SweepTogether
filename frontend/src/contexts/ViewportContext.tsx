@@ -1,14 +1,13 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef } from 'react';
 import { useViewport } from '../hooks/useViewport';
 import { ChunkCoords, Coordinates, ViewportState } from '../types';
 
 const CELL_SIZE = 30;
-const CHUNK_BUFFER = 2;
-const DIRECTION_EXTRA = 1;
+const CHUNK_BUFFER = 4;
+const DIRECTION_EXTRA = 2;
 
 export interface ViewportContextValue {
   viewport: ViewportState;
-  scale: number;
   /** Chunks exactly within the visible viewport — subscribe immediately. */
   immediateChunks: ChunkCoords[];
   /** Visible + buffer + directional bias — subscribe after debounce. */
@@ -16,7 +15,6 @@ export interface ViewportContextValue {
   onPanStart: (clientX: number, clientY: number) => void;
   onPanMove: (clientX: number, clientY: number) => void;
   onPanEnd: () => void;
-  onZoom: (delta: number) => void;
 }
 
 const ViewportContext = createContext<ViewportContextValue | null>(null);
@@ -66,9 +64,6 @@ export const ViewportProvider: React.FC<ViewportProviderProps> = ({
   initialCenter,
   children
 }) => {
-  const [scale, setScale] = useState(1.0);
-  const cellSizePx = CELL_SIZE * scale;
-
   const {
     viewport,
     handlePanStart,
@@ -79,19 +74,17 @@ export const ViewportProvider: React.FC<ViewportProviderProps> = ({
     initialCenter: initialCenter ?? { x: 0, y: 0 },
     initialWidth: Math.ceil(window.innerWidth / CELL_SIZE),
     initialHeight: Math.ceil(window.innerHeight / CELL_SIZE),
-    cellSizePx,
+    cellSizePx: CELL_SIZE,
   });
 
   useEffect(() => {
-    resizeTo(
-      Math.ceil(window.innerWidth / cellSizePx),
-      Math.ceil(window.innerHeight / cellSizePx),
+    const handler = () => resizeTo(
+      Math.ceil(window.innerWidth / CELL_SIZE),
+      Math.ceil(window.innerHeight / CELL_SIZE),
     );
-  }, [scale]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const onZoom = useCallback((delta: number) => {
-    setScale(s => Math.max(0.1, Math.min(4, s * (1 + delta))));
-  }, []);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, [resizeTo]);
 
   // Track pan direction from successive center positions without adding state.
   const prevCenterRef = useRef(viewport.center);
@@ -108,13 +101,11 @@ export const ViewportProvider: React.FC<ViewportProviderProps> = ({
 
   const value: ViewportContextValue = {
     viewport,
-    scale,
     immediateChunks,
     bufferedChunks,
     onPanStart: handlePanStart,
     onPanMove: handlePanMove,
     onPanEnd: handlePanEnd,
-    onZoom,
   };
 
   return (

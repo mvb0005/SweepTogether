@@ -43,16 +43,10 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     socket.on('disconnect', handleDisconnect);
     socket.on('connect_error', handleError);
 
-    // Debug: log all events from the server
-    socket.onAny((event, ...args) => {
-      console.debug(`[SOCKET DEBUG] Event: ${event}`, ...args);
-    });
-
     return () => {
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
       socket.off('connect_error', handleError);
-      socket.offAny();
     };
   }, []);
 

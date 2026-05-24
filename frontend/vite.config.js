@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     port: 3000,
     host: true, // Ensure Vite listens on all interfaces within the container
+    allowedHosts: ['local.sweeptogether.com'],
     watch: {
       // Use polling instead of fs events for Docker compatibility
       usePolling: true,

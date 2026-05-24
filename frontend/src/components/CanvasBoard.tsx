@@ -15,21 +15,150 @@ const NUMBER_COLORS: Record<number, string> = {
   5: '#800000', 6: '#008080', 7: '#000000', 8: '#808080',
 };
 
+// ─── Render passes ─────────────────────────────────────────────────────────
+
+interface DrawParams {
+  ctx: CanvasRenderingContext2D;
+  worldLeft: number;
+  worldTop: number;
+  logW: number;
+  logH: number;
+  cellPx: number;
+  chunkSize: number;
+  visMinCx: number;
+  visMaxCx: number;
+  visMinCy: number;
+  visMaxCy: number;
+}
+
+function drawBackground(p: DrawParams, allChunks: ChunkMap): void {
+  // Dark void, then lighter fill only for subscribed chunks.
+  p.ctx.fillStyle = '#9e9e9e';
+  p.ctx.fillRect(0, 0, p.logW, p.logH);
+
+  p.ctx.fillStyle = '#bdbdbd';
+  const chunkPx = p.chunkSize * p.cellPx;
+  for (let cx = p.visMinCx; cx <= p.visMaxCx; cx++) {
+    for (let cy = p.visMinCy; cy <= p.visMaxCy; cy++) {
+      if (!allChunks[`${cx}_${cy}`]) continue;
+      const csx = (cx * p.chunkSize - p.worldLeft) * p.cellPx;
+      const csy = (cy * p.chunkSize - p.worldTop)  * p.cellPx;
+      p.ctx.fillRect(csx, csy, chunkPx, chunkPx);
+    }
+  }
+}
+
+function drawGridLines(p: DrawParams): void {
+  if (p.cellPx < 2) return;
+
+  const c0 = Math.floor(p.worldLeft);
+  const c1 = Math.ceil(p.worldLeft + p.logW / p.cellPx) + 1;
+  const r0 = Math.floor(p.worldTop);
+  const r1 = Math.ceil(p.worldTop + p.logH / p.cellPx) + 1;
+
+  p.ctx.lineWidth = 1;
+  p.ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+  p.ctx.beginPath();
+  for (let c = c0; c <= c1; c++) {
+    if (c % p.chunkSize === 0) continue;
+    const sx = Math.round((c - p.worldLeft) * p.cellPx) + 0.5;
+    p.ctx.moveTo(sx, 0); p.ctx.lineTo(sx, p.logH);
+  }
+  for (let r = r0; r <= r1; r++) {
+    if (r % p.chunkSize === 0) continue;
+    const sy = Math.round((r - p.worldTop) * p.cellPx) + 0.5;
+    p.ctx.moveTo(0, sy); p.ctx.lineTo(p.logW, sy);
+  }
+  p.ctx.stroke();
+
+  p.ctx.strokeStyle = 'rgba(80,120,200,0.6)';
+  p.ctx.lineWidth = 2;
+  p.ctx.beginPath();
+  for (let c = c0; c <= c1; c++) {
+    if (c % p.chunkSize !== 0) continue;
+    const sx = Math.round((c - p.worldLeft) * p.cellPx) + 0.5;
+    p.ctx.moveTo(sx, 0); p.ctx.lineTo(sx, p.logH);
+  }
+  for (let r = r0; r <= r1; r++) {
+    if (r % p.chunkSize !== 0) continue;
+    const sy = Math.round((r - p.worldTop) * p.cellPx) + 0.5;
+    p.ctx.moveTo(0, sy); p.ctx.lineTo(p.logW, sy);
+  }
+  p.ctx.stroke();
+}
+
+function drawCells(p: DrawParams, allChunks: ChunkMap): void {
+  p.ctx.font = `${p.cellPx * 0.65}px serif`;
+  p.ctx.textAlign = 'center';
+  p.ctx.textBaseline = 'middle';
+
+  for (let cx = p.visMinCx; cx <= p.visMaxCx; cx++) {
+    for (let cy = p.visMinCy; cy <= p.visMaxCy; cy++) {
+      const chunk = allChunks[`${cx}_${cy}`];
+      if (!chunk) continue;
+      const baseX = cx * p.chunkSize;
+      const baseY = cy * p.chunkSize;
+
+      for (let lcy = 0; lcy < chunk.cells.length; lcy++) {
+        const row = chunk.cells[lcy];
+        for (let lcx = 0; lcx < row.length; lcx++) {
+          const cell = row[lcx];
+          if (!cell.revealed && !cell.flagged) continue;
+
+          const sx = (baseX + lcx - p.worldLeft) * p.cellPx;
+          const sy = (baseY + lcy - p.worldTop)  * p.cellPx;
+
+          p.ctx.fillStyle = cell.revealed ? '#eeeeee' : '#ffd700';
+          p.ctx.fillRect(sx, sy, p.cellPx - 1, p.cellPx - 1);
+
+          if (cell.revealed && cell.isMine) {
+            p.ctx.fillText('💣', sx + p.cellPx / 2, sy + p.cellPx / 2);
+          } else if (cell.flagged && !cell.revealed) {
+            p.ctx.fillText('🚩', sx + p.cellPx / 2, sy + p.cellPx / 2);
+          } else if (cell.revealed && !cell.isMine && cell.adjacentMines && cell.adjacentMines > 0) {
+            p.ctx.fillStyle = NUMBER_COLORS[cell.adjacentMines] ?? '#333';
+            p.ctx.font = `bold ${Math.max(8, p.cellPx * 0.5)}px monospace`;
+            p.ctx.textAlign = 'center';
+            p.ctx.textBaseline = 'middle';
+            p.ctx.fillText(String(cell.adjacentMines), sx + p.cellPx / 2, sy + p.cellPx / 2);
+            p.ctx.font = `${p.cellPx * 0.65}px serif`;
+          }
+        }
+      }
+    }
+  }
+}
+
+// ─── Component ──────────────────────────────────────────────────────────────
+
 const CanvasBoard: React.FC<CanvasBoardProps> = ({ chunks, chunkSize }) => {
-  const { viewport, scale, onPanStart, onPanMove, onPanEnd, onZoom } = useViewportContext();
+  const { viewport, onPanStart, onPanMove, onPanEnd } = useViewportContext();
   const { isPlayerLocked, onRevealCell, onFlagCell, onChordCell } = useGameContext();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const draggingRef = useRef(false);
   const rafRef = useRef<number | null>(null);
 
-  // Keep refs pointing to latest values so draw() closure doesn't stale.
   const chunksRef = useRef(chunks);
   chunksRef.current = chunks;
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
-  const scaleRef = useRef(scale);
-  scaleRef.current = scale;
+
+  // Stable refs so touch handler useEffect never needs to re-register
+  const onPanStartRef = useRef(onPanStart);
+  const onPanMoveRef = useRef(onPanMove);
+  const onPanEndRef = useRef(onPanEnd);
+  const onRevealCellRef = useRef(onRevealCell);
+  const onFlagCellRef = useRef(onFlagCell);
+  const onChordCellRef = useRef(onChordCell);
+  const isPlayerLockedRef = useRef(isPlayerLocked);
+  onPanStartRef.current = onPanStart;
+  onPanMoveRef.current = onPanMove;
+  onPanEndRef.current = onPanEnd;
+  onRevealCellRef.current = onRevealCell;
+  onFlagCellRef.current = onFlagCell;
+  onChordCellRef.current = onChordCell;
+  isPlayerLockedRef.current = isPlayerLocked;
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -38,12 +167,10 @@ const CanvasBoard: React.FC<CanvasBoardProps> = ({ chunks, chunkSize }) => {
     if (!ctx) return;
 
     const vp = viewportRef.current;
-    const sc = scaleRef.current;
     const allChunks = chunksRef.current;
-    const cellPx = BASE_CELL_PX * sc;
+    const cellPx = BASE_CELL_PX;
     const dpr = window.devicePixelRatio || 1;
 
-    // Resize canvas buffer to match physical pixels.
     const logW = canvas.clientWidth;
     const logH = canvas.clientHeight;
     if (canvas.width !== logW * dpr || canvas.height !== logH * dpr) {
@@ -55,104 +182,20 @@ const CanvasBoard: React.FC<CanvasBoardProps> = ({ chunks, chunkSize }) => {
 
     const worldLeft = vp.center.x - vp.width / 2;
     const worldTop  = vp.center.y - vp.height / 2;
-
-    // Void background, then per-chunk fill; unrevealed cells are implied by the background.
-    ctx.fillStyle = '#9e9e9e';
-    ctx.fillRect(0, 0, logW, logH);
-    ctx.fillStyle = '#bdbdbd';
-    const chunkPx = chunkSize * cellPx;
     const visMinCx = Math.floor(worldLeft / chunkSize);
     const visMaxCx = Math.floor((worldLeft + logW / cellPx) / chunkSize);
     const visMinCy = Math.floor(worldTop  / chunkSize);
     const visMaxCy = Math.floor((worldTop  + logH / cellPx) / chunkSize);
 
-    for (let cx = visMinCx; cx <= visMaxCx; cx++) {
-      for (let cy = visMinCy; cy <= visMaxCy; cy++) {
-        if (!allChunks[`${cx}_${cy}`]) continue;
-        const csx = (cx * chunkSize - worldLeft) * cellPx;
-        const csy = (cy * chunkSize - worldTop)  * cellPx;
-        ctx.fillRect(csx, csy, chunkPx, chunkPx);
-      }
-    }
+    const p: DrawParams = {
+      ctx, worldLeft, worldTop, logW, logH, cellPx, chunkSize,
+      visMinCx, visMaxCx, visMinCy, visMaxCy,
+    };
 
-    // Cell grid lines + chunk border guides spanning full viewport.
-    if (cellPx >= 2) {
-      const c0 = Math.floor(worldLeft);
-      const c1 = Math.ceil(worldLeft + logW / cellPx) + 1;
-      const r0 = Math.floor(worldTop);
-      const r1 = Math.ceil(worldTop + logH / cellPx) + 1;
-
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = 'rgba(0,0,0,0.1)';
-      ctx.beginPath();
-      for (let c = c0; c <= c1; c++) {
-        if (c % chunkSize === 0) continue;
-        const sx = Math.round((c - worldLeft) * cellPx) + 0.5;
-        ctx.moveTo(sx, 0); ctx.lineTo(sx, logH);
-      }
-      for (let r = r0; r <= r1; r++) {
-        if (r % chunkSize === 0) continue;
-        const sy = Math.round((r - worldTop) * cellPx) + 0.5;
-        ctx.moveTo(0, sy); ctx.lineTo(logW, sy);
-      }
-      ctx.stroke();
-
-      ctx.strokeStyle = 'rgba(80,120,200,0.6)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      for (let c = c0; c <= c1; c++) {
-        if (c % chunkSize !== 0) continue;
-        const sx = Math.round((c - worldLeft) * cellPx) + 0.5;
-        ctx.moveTo(sx, 0); ctx.lineTo(sx, logH);
-      }
-      for (let r = r0; r <= r1; r++) {
-        if (r % chunkSize !== 0) continue;
-        const sy = Math.round((r - worldTop) * cellPx) + 0.5;
-        ctx.moveTo(0, sy); ctx.lineTo(logW, sy);
-      }
-      ctx.stroke();
-    }
-
-    ctx.font = `${cellPx * 0.65}px serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    for (let cx = visMinCx; cx <= visMaxCx; cx++) {
-      for (let cy = visMinCy; cy <= visMaxCy; cy++) {
-        const chunk = allChunks[`${cx}_${cy}`];
-        if (!chunk) continue;
-        const baseX = cx * chunkSize;
-        const baseY = cy * chunkSize;
-
-        for (let lcy = 0; lcy < chunk.cells.length; lcy++) {
-          const row = chunk.cells[lcy];
-          for (let lcx = 0; lcx < row.length; lcx++) {
-            const cell = row[lcx];
-            if (!cell.revealed && !cell.flagged) continue;
-
-            const sx = (baseX + lcx - worldLeft) * cellPx;
-            const sy = (baseY + lcy - worldTop)  * cellPx;
-
-            ctx.fillStyle = cell.revealed ? '#eeeeee' : '#ffd700';
-            ctx.fillRect(sx, sy, cellPx - 1, cellPx - 1);
-
-            if (cell.revealed && cell.isMine) {
-              ctx.fillText('💣', sx + cellPx / 2, sy + cellPx / 2);
-            } else if (cell.flagged && !cell.revealed) {
-              ctx.fillText('🚩', sx + cellPx / 2, sy + cellPx / 2);
-            } else if (cell.revealed && !cell.isMine && cell.adjacentMines && cell.adjacentMines > 0) {
-              ctx.fillStyle = NUMBER_COLORS[cell.adjacentMines] ?? '#333';
-              ctx.font = `bold ${Math.max(8, cellPx * 0.5)}px monospace`;
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.fillText(String(cell.adjacentMines), sx + cellPx / 2, sy + cellPx / 2);
-              ctx.font = `${cellPx * 0.65}px serif`;
-            }
-          }
-        }
-      }
-    }
-  }, []); // stable — reads everything from refs
+    drawBackground(p, allChunks);
+    drawGridLines(p);
+    drawCells(p, allChunks);
+  }, [chunkSize]); // stable — reads everything else from refs
 
   const scheduleDraw = useCallback(() => {
     if (rafRef.current !== null) return;
@@ -162,44 +205,115 @@ const CanvasBoard: React.FC<CanvasBoardProps> = ({ chunks, chunkSize }) => {
     });
   }, [draw]);
 
-  // Redraw whenever data or viewport changes.
-  useEffect(() => {
-    scheduleDraw();
-  }, [chunks, viewport, scale, scheduleDraw]);
+  useEffect(() => { scheduleDraw(); }, [chunks, viewport, scheduleDraw]);
 
-  // Redraw on window resize.
   useEffect(() => {
     window.addEventListener('resize', scheduleDraw);
     return () => window.removeEventListener('resize', scheduleDraw);
   }, [scheduleDraw]);
 
-  // Wheel zoom — must be non-passive to call preventDefault().
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const handler = (e: WheelEvent) => {
-      e.preventDefault();
-      const delta = Math.max(-0.3, Math.min(0.3, -e.deltaY * 0.002));
-      onZoom(delta);
-    };
-    canvas.addEventListener('wheel', handler, { passive: false });
-    return () => canvas.removeEventListener('wheel', handler);
-  }, [onZoom]);
-
   const getWorldCell = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
-    const cellPx = BASE_CELL_PX * scaleRef.current;
+    const cellPx = BASE_CELL_PX;
     const vp = viewportRef.current;
     const worldLeft = vp.center.x - vp.width / 2;
     const worldTop  = vp.center.y - vp.height / 2;
-    // Apply Math.floor to the full expression so fractional worldLeft doesn't
-    // produce float cell coords (e.g. worldLeft=-31.5 → worldX=0.5).
     return {
       worldX: Math.floor((clientX - rect.left) / cellPx + worldLeft),
       worldY: Math.floor((clientY - rect.top)  / cellPx + worldTop),
     };
   }, []);
+
+  // Touch handling — registered with passive:false so preventDefault stops scroll
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const LONG_PRESS_MS = 500;
+    const DRAG_THRESHOLD_PX = 10;
+
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchDragging = false;
+    let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastTapTime = 0;
+
+    const clearLongPress = () => {
+      if (longPressTimer !== null) { clearTimeout(longPressTimer); longPressTimer = null; }
+    };
+
+    const cellFromTouch = (clientX: number, clientY: number) => {
+      const rect = canvas.getBoundingClientRect();
+      const vp = viewportRef.current;
+      const worldLeft = vp.center.x - vp.width / 2;
+      const worldTop  = vp.center.y - vp.height / 2;
+      return {
+        worldX: Math.floor((clientX - rect.left) / BASE_CELL_PX + worldLeft),
+        worldY: Math.floor((clientY - rect.top)  / BASE_CELL_PX + worldTop),
+      };
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) { clearLongPress(); return; }
+      e.preventDefault();
+      const t = e.touches[0];
+      touchStartX = t.clientX;
+      touchStartY = t.clientY;
+      touchDragging = false;
+      onPanStartRef.current(t.clientX, t.clientY);
+
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        if (!touchDragging && !isPlayerLockedRef.current) {
+          const { worldX, worldY } = cellFromTouch(touchStartX, touchStartY);
+          onFlagCellRef.current(worldX, worldY);
+        }
+      }, LONG_PRESS_MS);
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      if (!touchDragging && Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY) > DRAG_THRESHOLD_PX) {
+        touchDragging = true;
+        clearLongPress();
+      }
+      if (touchDragging) onPanMoveRef.current(t.clientX, t.clientY);
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      clearLongPress();
+      onPanEndRef.current();
+
+      if (!touchDragging && e.changedTouches.length === 1) {
+        const t = e.changedTouches[0];
+        const now = Date.now();
+        const { worldX, worldY } = cellFromTouch(t.clientX, t.clientY);
+        if (now - lastTapTime < 300) {
+          lastTapTime = 0;
+          if (!isPlayerLockedRef.current) onChordCellRef.current(worldX, worldY);
+        } else {
+          lastTapTime = now;
+          if (!isPlayerLockedRef.current) onRevealCellRef.current(worldX, worldY);
+        }
+      }
+      touchDragging = false;
+    };
+
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove',  handleTouchMove,  { passive: false });
+    canvas.addEventListener('touchend',   handleTouchEnd,   { passive: false });
+
+    return () => {
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchmove',  handleTouchMove);
+      canvas.removeEventListener('touchend',   handleTouchEnd);
+      clearLongPress();
+    };
+  }, []); // stable — all callbacks accessed via refs
 
   return (
     <canvas
