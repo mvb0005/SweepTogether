@@ -1,0 +1,141 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #14161a;
+  color: #e8eaed;
+}
+
+.app {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.game-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #1a1d23;
+}
+
+.game-view {
+  position: absolute;
+  inset: 0;
+}
+
+.game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.game-hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 10;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.game-hud__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.game-hud__brand {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(20, 22, 28, 0.82);
+}
+
+.game-hud__stats {
+  font-size: 12px;
+  color: #c4c7cc;
+}
+
+.game-hud__stats span {
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(20, 22, 28, 0.72);
+}
+
+.game-hud__pill {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(180, 60, 60, 0.85);
+  color: #fff;
+}
+
+.game-hud__pill--ok {
+  background: rgba(40, 120, 70, 0.9);
+}
+
+.game-hud__banner {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: rgba(30, 90, 160, 0.9);
+  color: #fff;
+}
+
+.game-hud__banner--lockout {
+  background: rgba(180, 50, 50, 0.92);
+}
+
+.game-hud__help {
+  font-size: 11px;
+  color: #9aa0a6;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(20, 22, 28, 0.55);
+  max-width: 520px;
+}
+
+.game-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  text-align: center;
+}
+
+.game-overlay--error {
+  color: #ff8a80;
+  background: rgba(20, 22, 28, 0.95);
+}
+
+.loading-message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9aa0a6;
+  font-size: 15px;
+}

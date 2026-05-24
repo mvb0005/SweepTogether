@@ -38,10 +38,11 @@ nginx (:8080)
 | `backend/src/application/` | Service layer (game, player actions, score, leaderboard) |
 | `backend/src/domain/` | Core logic (gridLogic, worldGenerator, BoardManager, Chunk) |
 | `frontend/src/App.tsx` | Routes + socket join logic |
-| `frontend/src/components/Viewport.tsx` | Render-prop wrapper for viewport state **(stub — pan handlers are no-ops)** |
-| `frontend/src/hooks/useViewport.tsx` | Full pan/keyboard navigation logic **(not yet wired to Viewport.tsx)** |
-| `frontend/src/components/ChunkLoader.tsx` | Chunk subscribe/unsubscribe + data fetching |
-| `frontend/src/components/ChunkedBoard.tsx` | Renders visible chunks |
+| `frontend/src/renderer/BoardRenderer.ts` | Canvas 2D board renderer (cells, grid, chunk borders) |
+| `frontend/src/hooks/useViewport.tsx` | Viewport pan/zoom/keyboard state |
+| `frontend/src/contexts/ViewportContext.tsx` | Chunk subscription regions + pan/zoom API |
+| `frontend/src/hooks/useChunkStore.ts` | Chunk subscribe/unsubscribe + socket deltas |
+| `frontend/src/components/GameView.tsx` | Main game shell (HUD + canvas) |
 
 ## Known Incomplete Work
 
