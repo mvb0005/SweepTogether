@@ -37,12 +37,13 @@ nginx (:8080)
 | `backend/src/infrastructure/network/socketHandlers.ts` | Socket event routing |
 | `backend/src/application/` | Service layer (game, player actions, score, leaderboard) |
 | `backend/src/domain/` | Core logic (gridLogic, worldGenerator, BoardManager, Chunk) |
-| `frontend/src/App.tsx` | Routes + socket join logic, ViewportProvider |
-| `frontend/src/hooks/useViewport.tsx` | Pan/keyboard navigation, chunk subscription trigger |
-| `frontend/src/hooks/useSocket.tsx` | Socket.IO connection + message routing |
-| `frontend/src/components/ChunkLoader.tsx` | Chunk subscribe/unsubscribe + data fetching, renders CanvasBoard |
-| `frontend/src/components/CanvasBoard.tsx` | Canvas-based chunk renderer (32×32 cells per chunk) |
-| `frontend/src/components/BoardSVG.tsx` | SVG board — legacy, kept for reference |
+| `frontend/src/App.tsx` | Routes, join session, tile actions via Socket.IO |
+| `frontend/src/hooks/useSocket.tsx` | Socket.IO connection |
+| `frontend/src/hooks/useGameSession.tsx` | `joinGame` / `gameJoined` handshake |
+| `frontend/src/hooks/useChunkSubscriptions.tsx` | Chunk subscribe/unsubscribe + live updates |
+| `frontend/src/renderer/BoardRenderer.ts` | Canvas 2D board renderer (cells, grid, chunk borders) |
+| `frontend/src/contexts/ViewportContext.tsx` | Pan/zoom + chunk subscription regions |
+| `frontend/src/components/GameView.tsx` | Game shell (HUD + canvas) |
 
 ## Known Incomplete Work
 

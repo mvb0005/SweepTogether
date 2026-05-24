@@ -39,11 +39,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({
     onChordCell,
   };
 
-  return (
-    <GameContext.Provider value={value}>
-      {children}
-    </GameContext.Provider>
-  );
+  return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 };
 
 export function useGameContext(): GameContextValue {

@@ -1,22 +1,18 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 
-// Extract playerId from URL query params
 const params = new URLSearchParams(window.location.search);
 const playerId = params.get('playerId') || 'Anonymous';
 
-// Create the socket instance ONCE, passing playerId as a query param
 const socket: Socket = io({
-  query: { playerId }
+  query: { playerId },
 });
 
-// Define the context type
 interface SocketContextType {
   socket: Socket;
   isConnected: boolean;
 }
 
-// Create a context for the socket
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
 
 export const useSocket = (): SocketContextType => {
@@ -32,7 +28,7 @@ interface SocketProviderProps {
 }
 
 export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
-  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
     const handleConnect = () => setIsConnected(true);

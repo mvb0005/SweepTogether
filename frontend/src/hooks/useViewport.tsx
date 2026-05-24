@@ -138,27 +138,17 @@ export function useViewport({
     });
   }, [viewport.center]);
 
-  // Pan movement - Optimize to reduce the number of state updates
+  // Smooth pixel panning — center may be fractional for fluid motion.
   const handlePanMove = useCallback((clientX: number, clientY: number) => {
     if (isPanning && panStart) {
-      // Calculate the distance moved in pixels
       const deltaX = panStart.x - clientX;
       const deltaY = panStart.y - clientY;
-      
-      // Convert pixel movement to cell movement based on cell size
-      const cellDeltaX = Math.round(deltaX / cellSizePx);
-      const cellDeltaY = Math.round(deltaY / cellSizePx);
-      
-      // Check if we've moved at least 1 cell before updating
-      if (cellDeltaX !== 0 || cellDeltaY !== 0) {
-        // Update the center position
-        updateViewport({
-          center: {
-            x: panStart.centerX + cellDeltaX,
-            y: panStart.centerY + cellDeltaY
-          }
-        });
-      }
+      updateViewport({
+        center: {
+          x: panStart.centerX + deltaX / cellSizePx,
+          y: panStart.centerY + deltaY / cellSizePx,
+        },
+      });
     }
   }, [isPanning, panStart, updateViewport, cellSizePx]);
 
