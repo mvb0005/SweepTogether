@@ -155,18 +155,10 @@ export function registerSocketHandlers(
 
     const streamMs = (performance.now() - t0).toFixed(1);
 
-    // Run flood fills in the background — results broadcast to chunk rooms, so
-    // the client receives them automatically without needing to wait here.
+    // Enqueue flood fills — serialised per game so concurrent subscriptions
+    // don't run competing BFS loops over the same open region.
     if (allFillPoints.length > 0) {
-      setImmediate(async () => {
-        const tf = performance.now();
-        try {
-          await gameStateService.runBulkFloodFill(gameId, allFillPoints, socket.id);
-          console.log(`[fills] ${allFillPoints.length} points done in ${(performance.now() - tf).toFixed(1)}ms socket=${socket.id}`);
-        } catch (err) {
-          console.error('[subscribeToChunks] flood fill error:', err);
-        }
-      });
+      gameStateService.enqueueFill(gameId, allFillPoints, socket.id);
     }
 
     console.log(`[subscribeToChunks] chunks=${data.chunks.length} fills=${allFillPoints.length} stream=${streamMs}ms socket=${socket.id}`);

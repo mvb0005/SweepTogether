@@ -58,6 +58,11 @@ export class GameStateService {
     private chunkManagers: Map<string, IChunkManager> = new Map(); // Renamed for ChunkManager instances
     private io?: SocketIOServer;
 
+    // Per-game flood fill queue: points that arrived while a fill was running
+    // are merged and dispatched as one BFS after the current run finishes.
+    private fillQueues  = new Map<string, { x: number; y: number }[]>();
+    private fillRunning = new Set<string>();
+
     constructor(io?: SocketIOServer) {
         console.log('[GameStateService] Constructor called');
         this.io = io;
@@ -418,6 +423,51 @@ export class GameStateService {
             await new Promise<void>(resolve => setImmediate(resolve));
         }
         console.log(`[streamChunks] cached=${coords.length - uncached.length} built=${built} db=${dbMs}ms`);
+    }
+
+    /**
+     * Enqueues flood fill points for a game. If no fill is currently running,
+     * one is started immediately. If one is already running, the points are
+     * merged into the queue and dispatched as a single BFS when the current
+     * run finishes — preventing concurrent fills from revisiting the same
+     * large open region multiple times.
+     */
+    enqueueFill(gameId: string, points: { x: number; y: number }[], playerId?: string): void {
+        if (points.length === 0) return;
+
+        if (!this.fillQueues.has(gameId)) this.fillQueues.set(gameId, []);
+        this.fillQueues.get(gameId)!.push(...points);
+
+        if (this.fillRunning.has(gameId)) return; // will be picked up after current run
+        this.fillRunning.add(gameId);
+
+        setImmediate(() => this.drainFillQueue(gameId, playerId));
+    }
+
+    private async drainFillQueue(gameId: string, playerId?: string): Promise<void> {
+        const queue = this.fillQueues.get(gameId);
+        if (!queue || queue.length === 0) {
+            this.fillRunning.delete(gameId);
+            return;
+        }
+
+        // Drain all queued points into one merged BFS run.
+        const points = queue.splice(0);
+        const t0 = performance.now();
+        try {
+            await this.runBulkFloodFill(gameId, points, playerId);
+            console.log(`[fills] ${points.length} points done in ${(performance.now() - t0).toFixed(1)}ms`);
+        } catch (err) {
+            console.error('[fills] error:', err);
+        }
+
+        // If more points arrived while we were running, dispatch another pass.
+        const remaining = this.fillQueues.get(gameId);
+        if (remaining && remaining.length > 0) {
+            setImmediate(() => this.drainFillQueue(gameId, playerId));
+        } else {
+            this.fillRunning.delete(gameId);
+        }
     }
 
     /**
