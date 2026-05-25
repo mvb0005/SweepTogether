@@ -1,0 +1,72 @@
+# Production stack — use: docker compose -f docker-compose.prod.yml up --build
+services:
+  backend:
+    build:
+      context: ./backend
+      args:
+        NODE_ENV: production
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=production
+      - MONGODB_URI=mongodb://mongo_user:mongo_password@mongo:27017/minesweeper_infinite?authSource=admin
+      - DB_NAME=minesweeper_infinite
+    depends_on:
+      - mongo
+    networks:
+      - minesweeper-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    ports:
+      - "3000:80"
+    networks:
+      - minesweeper-net
+
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_started
+    networks:
+      - minesweeper-net
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:latest
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongo_user
+      MONGO_INITDB_ROOT_PASSWORD: mongo_password
+      MONGO_INITDB_DATABASE: minesweeper_infinite
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - minesweeper-net
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - nginx
+    networks:
+      - minesweeper-net
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+
+networks:
+  minesweeper-net:
+    driver: bridge

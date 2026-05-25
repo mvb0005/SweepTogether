@@ -119,5 +119,17 @@ Fixed clicks not registering while scrolling: the `chunkData` listener was being
 ## Session 39: [Cloudflare Workers DO Migration — Phase 1](./prompts/SESSION_39_DO_Migration_Phase1.md) (2026-05-16)
 Full backend replacement: Node.js + MongoDB + Socket.IO → Cloudflare Workers + Durable Objects + SQLite. Created `worker/` with `ChunkDO` (SQLite mine layout, BFS flood fill, bulk reveals, pending fills, delta broadcast) and `SessionDO` (native WebSocket, action routing, onChunkDelta RPC). Replaced frontend Socket.IO hook with native WebSocket (`on`/`off`/`send` API, auto-reconnect). Fixed `CHUNK_SIZE` mismatch (16→32 in ViewportProvider). Both worker and frontend pass `tsc --noEmit` clean.
 
+## Session 40: [Dev Docker Hot-Reload Stack](./prompts/SESSION_40_Dev_Docker_Hot_Reload.md) (2026-05-23)
+Split dev from prod Docker workflows. Dev compose runs Vite HMR on `:3000` and nodemon backend with `src/` volume mount (preserving the Rust native addon). Nginx proxies WebSocket upgrades for HMR. Production frontend build moved to `Dockerfile.prod`.
+
+## Session 41: [Flood Fill Queue, Persistence Sync, and Chunk Memory Fixes](./prompts/SESSION_41_Flood_Fill_Persistence_Memory.md) (2026-05-23)
+Capped async flood-fill queue with multi-seed bulk BFS and event-loop yields. Full-buffer Mongo sync on fill/evict; fixed OOM from unbounded deferred chunks and pending fills. Chunk load coalescing, persisted-id fast path, and `chunkWire` buffer serialization. Added chunk-load perf harness and Mongo audit scripts.
+
+## Session 42: [Frontend Subscription Tuning and Telemetry A/B Framework](./prompts/SESSION_42_Frontend_Subscription_Telemetry.md) (2026-05-23)
+Chunk subscription cap with prefetch/retention zones and rAF-batched live updates. Client telemetry collector with control/treatment cohorts batched to backend for pan/subscribe latency comparison.
+
+## Session 43: [Production Docker Compose Split](./prompts/SESSION_43_Production_Docker_Split.md) (2026-05-23)
+Added `docker-compose.prod.yml` with static frontend nginx build and production backend, separate from the hot-reload dev stack.
+
 ## Session 35: [MongoDB Persistence & Spatial Indexing](./prompts/SESSION_35_MongoDB_Persistence.md) (2026-05-09)
 Replaced stub chunk persistence with a production-ready schema. Chunks stored as two 256-byte BinData buffers (`revealed`, `flagged`) with per-chunk player index array (max 64 players, Int8). Game document gains a `seed` field for deterministic WorldGenerator across server restarts. Optimistic concurrency via `version` field — flood fill reads, modifies buffer in application, writes back with version check and retries on conflict. PendingFills persisted to MongoDB so cross-chunk flood fill propagation survives crashes. Added MongoDB 2D spatial index on chunk coordinates for bounding-box and nearest-chunk queries. Replaced old `cells: { [key]: PointData }` format in `db.ts` with new `ChunkDocument` schema. Wired write-before-broadcast: all chunk mutations persist to MongoDB before emitting `chunkData`/`chunksData` to clients. Cleaned up all stale tests across 6 failing suites (removed removed-method tests, updated API renames, fixed `ChunkManager.revealAndPropagate` secondary-pending-fills bug). Added `Makefile` with `make test` / `make test-watch` / `make test-coverage` targets running tests in a standalone Docker container.
