@@ -9,12 +9,13 @@ import React, {
 import { useViewport } from '../hooks/useViewport';
 import {
   BASE_CELL_PX,
-  CHUNK_BUFFER,
   CHUNK_DIRECTION_EXTRA,
   MAX_SCALE,
   MIN_SCALE,
 } from '../constants';
 import { ChunkCoords, Coordinates, ViewportState } from '../types';
+import { chunkSetKey } from '../utils/chunkKeys';
+import { useTelemetry } from './TelemetryContext';
 
 export interface ViewportContextValue {
   viewport: ViewportState;
@@ -22,8 +23,10 @@ export interface ViewportContextValue {
   cellPx: number;
   /** Chunks in the visible viewport — subscribe immediately. */
   immediateChunks: ChunkCoords[];
-  /** Visible + buffer — subscribe after debounce; drives unsubscribe sync. */
-  bufferedChunks: ChunkCoords[];
+  /** Visible + buffer — subscribe immediately (prefetch). */
+  prefetchChunks: ChunkCoords[];
+  /** Debounced retention zone — controls when to unsubscribe. */
+  retentionChunks: ChunkCoords[];
   onPanStart: (clientX: number, clientY: number) => void;
   onPanMove: (clientX: number, clientY: number) => void;
   onPanEnd: () => void;
@@ -64,16 +67,17 @@ function getBufferedChunks(
   viewport: ViewportState,
   chunkSize: number,
   panDir: { dx: number; dy: number },
+  chunkBuffer: number,
 ): ChunkCoords[] {
   const minX = Math.floor((viewport.center.x - viewport.width / 2) / chunkSize);
   const maxX = Math.floor((viewport.center.x + viewport.width / 2) / chunkSize);
   const minY = Math.floor((viewport.center.y - viewport.height / 2) / chunkSize);
   const maxY = Math.floor((viewport.center.y + viewport.height / 2) / chunkSize);
 
-  const bufMinX = minX - CHUNK_BUFFER - (panDir.dx < 0 ? CHUNK_DIRECTION_EXTRA : 0);
-  const bufMaxX = maxX + CHUNK_BUFFER + (panDir.dx > 0 ? CHUNK_DIRECTION_EXTRA : 0);
-  const bufMinY = minY - CHUNK_BUFFER - (panDir.dy < 0 ? CHUNK_DIRECTION_EXTRA : 0);
-  const bufMaxY = maxY + CHUNK_BUFFER + (panDir.dy > 0 ? CHUNK_DIRECTION_EXTRA : 0);
+  const bufMinX = minX - chunkBuffer - (panDir.dx < 0 ? CHUNK_DIRECTION_EXTRA : 0);
+  const bufMaxX = maxX + chunkBuffer + (panDir.dx > 0 ? CHUNK_DIRECTION_EXTRA : 0);
+  const bufMinY = minY - chunkBuffer - (panDir.dy < 0 ? CHUNK_DIRECTION_EXTRA : 0);
+  const bufMaxY = maxY + chunkBuffer + (panDir.dy > 0 ? CHUNK_DIRECTION_EXTRA : 0);
 
   const chunks: ChunkCoords[] = [];
   for (let cx = bufMinX; cx <= bufMaxX; cx++)
@@ -89,6 +93,7 @@ export const ViewportProvider: React.FC<ViewportProviderProps> = ({
   initialCenter,
   children,
 }) => {
+  const { config, track } = useTelemetry();
   const [scale, setScale] = useState(1);
   const cellPx = BASE_CELL_PX * scale;
   const [hoverCell, setHoverCell] = useState<Coordinates | null>(null);
@@ -132,14 +137,36 @@ export const ViewportProvider: React.FC<ViewportProviderProps> = ({
   }
 
   const immediateChunks = getVisibleChunks(viewport, chunkSize);
-  const bufferedChunks = getBufferedChunks(viewport, chunkSize, panDirRef.current);
+  const prefetchChunks = getBufferedChunks(viewport, chunkSize, panDirRef.current, config.chunkBuffer);
+  const prefetchKey = chunkSetKey(prefetchChunks);
+  const [retentionChunks, setRetentionChunks] = useState<ChunkCoords[]>(prefetchChunks);
+  const retentionKey = chunkSetKey(retentionChunks);
+  const prevRetentionKeyRef = useRef(retentionKey);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setRetentionChunks(prefetchChunks);
+      if (prevRetentionKeyRef.current !== prefetchKey) {
+        track('viewport_buffer_sync', {
+          immediate: immediateChunks.length,
+          buffered: prefetchChunks.length,
+          chunkBuffer: config.chunkBuffer,
+          bufferDebounceMs: config.bufferDebounceMs,
+        });
+        prevRetentionKeyRef.current = prefetchKey;
+      }
+    }, config.bufferDebounceMs);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefetchKey, config.bufferDebounceMs]);
 
   const value: ViewportContextValue = {
     viewport,
     scale,
     cellPx,
     immediateChunks,
-    bufferedChunks,
+    prefetchChunks,
+    retentionChunks,
     onPanStart: handlePanStart,
     onPanMove: handlePanMove,
     onPanEnd: handlePanEnd,

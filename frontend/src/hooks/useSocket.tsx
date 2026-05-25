@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { telemetry } from '../telemetry/collector';
 
 const params = new URLSearchParams(window.location.search);
 const playerId = params.get('playerId') || 'Anonymous';
@@ -29,10 +30,18 @@ interface SocketProviderProps {
 
 export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
+  const connectStartedRef = useRef(performance.now());
 
   useEffect(() => {
-    const handleConnect = () => setIsConnected(true);
-    const handleDisconnect = () => setIsConnected(false);
+    const handleConnect = () => {
+      setIsConnected(true);
+      telemetry.trackDuration('socket_connected', connectStartedRef.current);
+    };
+    const handleDisconnect = () => {
+      setIsConnected(false);
+      telemetry.track('socket_disconnected');
+      connectStartedRef.current = performance.now();
+    };
     const handleError = () => setIsConnected(false);
 
     socket.on('connect', handleConnect);

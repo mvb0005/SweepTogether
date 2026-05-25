@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Socket } from 'socket.io-client';
+import { telemetry } from '../telemetry/collector';
 
 interface GameSession {
   playerId: string | null;
@@ -14,13 +15,19 @@ export function useGameSession(
 ): GameSession {
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [isJoined, setIsJoined] = useState(false);
+  const joinStartedRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!socket || !isConnected || isJoined) return;
 
+    joinStartedRef.current = performance.now();
     socket.emit('joinGame', { gameId, username });
 
     const handleGameJoined = (data: { playerId: string }) => {
+      if (joinStartedRef.current !== null) {
+        telemetry.trackDuration('game_joined', joinStartedRef.current);
+        joinStartedRef.current = null;
+      }
       setPlayerId(data.playerId);
       setIsJoined(true);
     };

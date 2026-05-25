@@ -1,5 +1,6 @@
 import React from 'react';
 import { useViewportContext } from '../contexts/ViewportContext';
+import { useTelemetry } from '../contexts/TelemetryContext';
 
 interface GameHudProps {
   isConnected: boolean;
@@ -15,6 +16,7 @@ const GameHud: React.FC<GameHudProps> = ({
   isInitialLoad,
 }) => {
   const { viewport, scale, hoverCell } = useViewportContext();
+  const { enabled, config } = useTelemetry();
   const centerX = Math.round(viewport.center.x);
   const centerY = Math.round(viewport.center.y);
 
@@ -25,6 +27,11 @@ const GameHud: React.FC<GameHudProps> = ({
         <span className={`game-hud__pill ${isConnected ? 'game-hud__pill--ok' : ''}`}>
           {isConnected ? 'Connected' : 'Reconnecting…'}
         </span>
+        {enabled && (
+          <span className="game-hud__pill game-hud__pill--ab" title="A/B experiment cohort">
+            AB:{config.variant}
+          </span>
+        )}
       </div>
       <div className="game-hud__row game-hud__stats">
         <span>Center ({centerX}, {centerY})</span>

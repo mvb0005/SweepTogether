@@ -15,13 +15,15 @@ interface GameViewProps {
 const GameView: React.FC<GameViewProps> = ({ isConnected, isJoined }) => {
   const { socket } = useSocket();
   const { gameId, isPlayerLocked } = useGameContext();
-  const { immediateChunks, bufferedChunks } = useViewportContext();
+  const { immediateChunks, prefetchChunks, retentionChunks, viewport } = useViewportContext();
   const { chunks, isLoading, error } = useChunkSubscriptions(
     socket,
     isConnected && isJoined,
     gameId,
     immediateChunks,
-    bufferedChunks,
+    prefetchChunks,
+    retentionChunks,
+    viewport.center,
   );
 
   if (error) {

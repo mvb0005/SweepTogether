@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { SocketProvider, useSocket } from './hooks/useSocket';
 import { useGameSession } from './hooks/useGameSession';
 import { ViewportProvider } from './contexts/ViewportContext';
+import { TelemetryProvider } from './contexts/TelemetryContext';
 import { GameProvider } from './contexts/GameContext';
 import GameView from './components/GameView';
 import { CHUNK_SIZE } from './constants';
@@ -61,27 +62,29 @@ const AppContent: React.FC = () => {
 
   return (
     <div className="app">
-      <Routes>
-        <Route
-          path="/"
-          element={
-            <div className="game-container">
-              <GameProvider
-                gameId={GAME_ID}
-                playerId={playerId}
-                isPlayerLocked={isPlayerLocked}
-                onRevealCell={handleRevealCell}
-                onFlagCell={handleFlagCell}
-                onChordCell={handleChordCell}
-              >
-                <ViewportProvider chunkSize={CHUNK_SIZE}>
-                  <GameView isConnected={isConnected} isJoined={isJoined} />
-                </ViewportProvider>
-              </GameProvider>
-            </div>
-          }
-        />
-      </Routes>
+      <TelemetryProvider>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <div className="game-container">
+                <GameProvider
+                  gameId={GAME_ID}
+                  playerId={playerId}
+                  isPlayerLocked={isPlayerLocked}
+                  onRevealCell={handleRevealCell}
+                  onFlagCell={handleFlagCell}
+                  onChordCell={handleChordCell}
+                >
+                  <ViewportProvider chunkSize={CHUNK_SIZE}>
+                    <GameView isConnected={isConnected} isJoined={isJoined} />
+                  </ViewportProvider>
+                </GameProvider>
+              </div>
+            }
+          />
+        </Routes>
+      </TelemetryProvider>
     </div>
   );
 };
