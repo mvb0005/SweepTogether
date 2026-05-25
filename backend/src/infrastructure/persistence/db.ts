@@ -68,7 +68,10 @@ export async function connectToDatabase(): Promise<void> {
         return;
     }
     try {
-        client = new MongoClient(MONGODB_URI);
+        client = new MongoClient(MONGODB_URI, {
+            maxPoolSize: 20,
+            compressors: ['zlib'],
+        });
         await client.connect();
         db = client.db(DB_NAME);
 

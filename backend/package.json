@@ -6,7 +6,13 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "nodemon src/infrastructure/network/server.ts",
-    "test": "jest"
+    "test": "jest",
+    "perf:chunks": "ts-node scripts/chunk-load-perf.ts sustained",
+    "perf:chunks:burst": "ts-node scripts/chunk-load-perf.ts burst",
+    "perf:chunks:sustained": "ts-node scripts/chunk-load-perf.ts sustained",
+    "perf:chunks:fill": "ts-node scripts/chunk-load-perf.ts fill",
+    "perf:chunks:marathon": "ts-node scripts/chunk-load-perf.ts marathon",
+    "audit:mongo": "node scripts/mongo-audit.mjs"
   },
   "keywords": [],
   "author": "",

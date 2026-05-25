@@ -1,6 +1,6 @@
 BACKEND_TEST_IMAGE := sweeptogether-backend-test
 
-.PHONY: test test-watch test-coverage up down pregen pregen-text
+.PHONY: test test-watch test-coverage up down pregen pregen-text perf-chunks
 
 # Build the backend test image. Cached after first run unless package.json changes.
 .backend-image:
@@ -54,3 +54,16 @@ up:
 
 down:
 	docker-compose down
+
+# Benchmark chunk subscribe/load throughput against the running backend (host :3001).
+perf-chunks:
+	cd backend && npm run perf:chunks:sustained
+
+perf-chunks-marathon:
+	cd backend && npm run perf:chunks:marathon
+
+perf-chunks-burst:
+	cd backend && npm run perf:chunks:burst
+
+perf-chunks-fill:
+	cd backend && npm run perf:chunks:fill

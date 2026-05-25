@@ -1,4 +1,5 @@
 import { Cell } from './types';
+import { invalidateChunkWireCache } from '../application/chunkWire';
 import { IChunk, Coordinate, ChunkState, PendingFillItem, CHUNK_SIZE, IChunkManager, FloodFillResult } from '../types/chunkTypes';
 
 export class Chunk implements IChunk {
@@ -63,6 +64,7 @@ export class Chunk implements IChunk {
       return;
     }
     this.tiles[localY][localX] = cell;
+    invalidateChunkWireCache(this);
   }
 
   async executeLocalFloodFill(

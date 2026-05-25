@@ -13,7 +13,7 @@ import {
     TileUpdatePayload,
     TilesUpdatePayload,
 } from '../domain/types';
-import { serializeChunk } from './gameStateService';
+import { serializeChunkWire, invalidateChunkWireCache } from './chunkWire';
 import { GameStateService } from './gameStateService';
 import { CHUNK_SIZE } from '../types/chunkTypes';
 
@@ -56,7 +56,8 @@ export class GameUpdateService {
             const [chunkX, chunkY] = key.split('_').map(Number);
             const chunk = chunkManager.getChunkById(key);
             if (!chunk) continue;
-            this.io.to(`${gameId}_chunk_${chunkX}_${chunkY}`).emit('chunkData', serializeChunk(chunk, gameId));
+            invalidateChunkWireCache(chunk);
+            this.io.to(`${gameId}_chunk_${chunkX}_${chunkY}`).emit('chunkData', serializeChunkWire(chunk, gameId));
         }
     }
 

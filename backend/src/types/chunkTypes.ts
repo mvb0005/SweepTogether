@@ -8,10 +8,12 @@ export type ChunkPersistenceLoader = (
   chunkX: number,
   chunkY: number
 ) => Promise<{
-  mines?: Uint8Array;          // defined → custom chunk
-  revealedIndices: Set<number>;
-  flaggedIndices: Set<number>;
-} | null>;                     // null → no persisted doc, use worldGenerator
+  mines?: Uint8Array;
+  revealedIndices?: Set<number>;
+  flaggedIndices?: Set<number>;
+  revealedBuf?: Buffer;
+  flaggedBuf?: Buffer;
+} | null>;
 
 export interface Coordinate {
   x: number;
@@ -59,7 +61,15 @@ export interface IChunkManager {
   revealAndPropagate(x: number, y: number, originalMineCountHint?: number): Promise<Cell[]>;
   processPendingFillsForChunk(chunkId: string, visited?: Set<string>): Promise<void>;
   drainSubscribedPendingFills(): Promise<void>;
-  preloadMany(docs: Array<{ chunkX: number; chunkY: number; mines?: Uint8Array; revealedIndices: Set<number>; flaggedIndices: Set<number> }>): Promise<void>;
+  preloadMany(docs: Array<{
+    chunkX: number;
+    chunkY: number;
+    mines?: Uint8Array;
+    revealedIndices?: Set<number>;
+    flaggedIndices?: Set<number>;
+    revealedBuf?: Buffer;
+    flaggedBuf?: Buffer;
+  }>): void;
   readonly pendingFills: Map<string, PendingFillItem[]>;
   readonly chunks: Map<string, IChunk>;
   broadcastChunkUpdate?: (chunk: IChunk) => void;

@@ -2,9 +2,9 @@ import { Collection, Binary } from 'mongodb';
 import { CHUNK_SIZE } from '../../types/chunkTypes';
 
 /** MongoDB returns Binary on read even when you stored a Buffer. This normalises both. */
-function toBuffer(val: Buffer | Binary): Buffer {
+export function chunkDocBuffer(val: Buffer | Binary | undefined): Buffer {
+  if (!val) return emptyBuffer();
   if (Buffer.isBuffer(val)) return val;
-  // Binary.buffer is a Node.js Buffer in the official driver
   return (val as Binary).buffer as unknown as Buffer;
 }
 
@@ -42,13 +42,26 @@ export class ChunkRepository {
   }
 
   async load(gameId: string, chunkX: number, chunkY: number): Promise<ChunkDocument | null> {
-    return this.collection.findOne({ _id: this.id(gameId, chunkX, chunkY) });
+    return this.collection.findOne(
+      { _id: this.id(gameId, chunkX, chunkY) },
+      { projection: { revealed: 1, flagged: 1, chunkConfig: 1 } },
+    );
   }
 
   async loadMany(gameId: string, coords: { chunkX: number; chunkY: number }[]): Promise<Map<string, ChunkDocument>> {
+    if (coords.length === 0) return new Map();
     const ids = coords.map(({ chunkX, chunkY }) => this.id(gameId, chunkX, chunkY));
-    const docs = await this.collection.find({ _id: { $in: ids } } as any).toArray();
-    return new Map(docs.map(doc => [doc._id, doc]));
+    const docs = await this.collection.find(
+      { _id: { $in: ids } },
+      { projection: { revealed: 1, flagged: 1, chunkConfig: 1 } },
+    ).toArray();
+    return new Map(docs.map(doc => [doc._id, doc as ChunkDocument]));
+  }
+
+  /** Returns all persisted chunk _ids for a game (lightweight index for skipping DB on noise chunks). */
+  async listIds(gameId: string): Promise<Set<string>> {
+    const docs = await this.collection.find({ gameId }, { projection: { _id: 1 } }).toArray();
+    return new Set(docs.map(doc => doc._id as string));
   }
 
   /**
@@ -92,6 +105,44 @@ export class ChunkRepository {
   }
 
   /**
+   * Merges in-memory revealed/flagged chunk buffers into MongoDB.
+   * Only writes cells currently unrevealed/unflagged in the persisted doc.
+   */
+  async syncChunkState(
+    gameId: string,
+    chunkX: number,
+    chunkY: number,
+    revealedBuf: Buffer,
+    flaggedBuf: Buffer,
+    playerId: string,
+  ): Promise<{ revealed: number; flagged: number }> {
+    await this.ensure(gameId, chunkX, chunkY);
+    const playerIndex = await this.getOrAddPlayerIndex(gameId, chunkX, chunkY, playerId);
+    if (playerIndex < 0) return { revealed: 0, flagged: 0 };
+
+    const revealCells: { localX: number; localY: number }[] = [];
+    for (let i = 0; i < CELLS_PER_CHUNK; i++) {
+      if (revealedBuf[i] !== 0xff) {
+        revealCells.push({ localX: i % CHUNK_SIZE, localY: Math.floor(i / CHUNK_SIZE) });
+      }
+    }
+    if (revealCells.length > 0) {
+      await this.revealCells(gameId, chunkX, chunkY, revealCells, playerIndex);
+    }
+
+    let flaggedCount = 0;
+    for (let i = 0; i < CELLS_PER_CHUNK; i++) {
+      if (flaggedBuf[i] === 0xff) continue;
+      const localX = i % CHUNK_SIZE;
+      const localY = Math.floor(i / CHUNK_SIZE);
+      await this.setFlagged(gameId, chunkX, chunkY, localX, localY, playerIndex, true);
+      flaggedCount++;
+    }
+
+    return { revealed: revealCells.length, flagged: flaggedCount };
+  }
+
+  /**
    * Persists revealed cells for a chunk using optimistic concurrency.
    * Retries if a concurrent write incremented the version.
    * Only sets cells that are currently unrevealed (-1) in the buffer.
@@ -107,9 +158,12 @@ export class ChunkRepository {
 
     for (let attempt = 0; attempt < 5; attempt++) {
       const doc = await this.collection.findOne({ _id: id });
-      if (!doc) return;
+      if (!doc) {
+        console.warn(`[revealCells] chunk doc missing: ${id}`);
+        return;
+      }
 
-      const buf = toBuffer(doc.revealed);
+      const buf = chunkDocBuffer(doc.revealed);
       let changed = false;
       for (const { localX, localY } of localCells) {
         const idx = cellIndex(localX, localY);
@@ -146,9 +200,12 @@ export class ChunkRepository {
 
     for (let attempt = 0; attempt < 5; attempt++) {
       const doc = await this.collection.findOne({ _id: id });
-      if (!doc) return;
+      if (!doc) {
+        console.warn(`[revealCells] chunk doc missing: ${id}`);
+        return;
+      }
 
-      const buf = toBuffer(doc.flagged);
+      const buf = chunkDocBuffer(doc.flagged);
       const idx = cellIndex(localX, localY);
       buf.writeInt8(set ? playerIndex : -1, idx);
 
@@ -218,12 +275,12 @@ export class ChunkRepository {
     const revealedIndices = new Set<number>();
     const flaggedIndices = new Set<number>();
 
-    const rev = toBuffer(doc.revealed);
-    const flg = toBuffer(doc.flagged);
+    const rev = chunkDocBuffer(doc.revealed);
+    const flg = chunkDocBuffer(doc.flagged);
 
     for (let i = 0; i < CELLS_PER_CHUNK; i++) {
-      if (rev.readInt8(i) !== -1) revealedIndices.add(i);
-      if (flg.readInt8(i) !== -1) flaggedIndices.add(i);
+      if (rev[i] !== 0xff) revealedIndices.add(i);
+      if (flg[i] !== 0xff) flaggedIndices.add(i);
     }
 
     return { revealedIndices, flaggedIndices };

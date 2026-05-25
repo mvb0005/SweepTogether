@@ -1,4 +1,5 @@
 import { IChunkManager, IChunk, Coordinate, CHUNK_SIZE, PendingFillItem, ChunkPersistenceLoader } from '../types/chunkTypes';
+import { invalidateChunkWireCache } from '../application/chunkWire';
 import { Chunk } from './Chunk';
 import { Cell, Coordinates } from './types'; // Assuming Cell is in domain/types.ts
 
@@ -13,6 +14,12 @@ export class ChunkManager implements IChunkManager {
   public broadcastChunkUpdate: (chunk: IChunk) => void;
   public pendingFills: Map<string, PendingFillItem[]> = new Map();
   private persistenceLoader?: ChunkPersistenceLoader;
+  private noiseMinesCache = new Map<string, Uint8Array>();
+  private deferredChunks = new Map<string, {
+    mines?: Uint8Array;
+    revealedBuf?: Buffer;
+    flaggedBuf?: Buffer;
+  }>();
 
   constructor(
     gameId: string,
@@ -52,11 +59,36 @@ export class ChunkManager implements IChunkManager {
     chunkY: number,
     mines?: Uint8Array,
     revealedIndices: Set<number> = new Set(),
-    flaggedIndices: Set<number> = new Set()
+    flaggedIndices: Set<number> = new Set(),
+    revealedBuf?: Buffer,
+    flaggedBuf?: Buffer,
   ): IChunk {
-    // Prefer the fast Rust chunk generator over the per-cell JS noise fallback.
     const resolvedMines = mines ?? this.chunkMineGenerator?.(chunkX, chunkY);
     const chunk = new Chunk(chunkX, chunkY, this.chunkSize, this.worldGenerator, resolvedMines, this.broadcastChunkUpdate);
+
+    if (revealedBuf || flaggedBuf) {
+      const size = this.chunkSize;
+      for (let ly = 0; ly < size; ly++) {
+        for (let lx = 0; lx < size; lx++) {
+          const idx = ly * size + lx;
+          const revealed = revealedBuf ? revealedBuf[idx] !== 0xff : false;
+          const flagged = flaggedBuf ? flaggedBuf[idx] !== 0xff : false;
+          if (!revealed && !flagged) continue;
+          const cell = chunk.getTile(lx, ly);
+          if (!cell) continue;
+          if (revealed) {
+            cell.revealed = true;
+            chunk.setTile(lx, ly, cell);
+          }
+          if (flagged) {
+            cell.flagged = true;
+            chunk.setTile(lx, ly, cell);
+          }
+        }
+      }
+      return chunk;
+    }
+
     for (const idx of revealedIndices) {
       const lx = idx % this.chunkSize;
       const ly = Math.floor(idx / this.chunkSize);
@@ -75,6 +107,9 @@ export class ChunkManager implements IChunkManager {
   public async getChunk(chunkX: number, chunkY: number): Promise<IChunk> {
     const chunkId = this.getChunkId(chunkX, chunkY);
     if (this.chunks.has(chunkId)) return this.chunks.get(chunkId)!;
+    if (this.deferredChunks.has(chunkId) || this.noiseMinesCache.has(chunkId)) {
+      return this.materializeChunk(chunkX, chunkY);
+    }
 
     const t0 = performance.now();
     let mines: Uint8Array | undefined;
@@ -84,17 +119,29 @@ export class ChunkManager implements IChunkManager {
     if (this.persistenceLoader) {
       const tDb0 = performance.now();
       const data = await this.persistenceLoader(chunkX, chunkY);
-      const dbMs = (performance.now() - tDb0).toFixed(1);
-      if (data) {
-        mines = data.mines;
-        revealedIndices = data.revealedIndices;
-        flaggedIndices = data.flaggedIndices;
-      }
+      const dbMs = performance.now() - tDb0;
       const tBuild0 = performance.now();
-      const chunk = this.buildChunkFromData(chunkX, chunkY, mines, revealedIndices, flaggedIndices);
-      const buildMs = (performance.now() - tBuild0).toFixed(1);
-      const totalMs = (performance.now() - t0).toFixed(1);
-      console.log(`[chunk] load (${chunkX},${chunkY}) db=${dbMs}ms build=${buildMs}ms total=${totalMs}ms`);
+      let chunk: IChunk;
+      if (data?.revealedBuf || data?.flaggedBuf) {
+        chunk = this.buildChunkFromData(
+          chunkX, chunkY, data.mines, new Set(), new Set(), data.revealedBuf, data.flaggedBuf,
+        );
+      } else if (data) {
+        chunk = this.buildChunkFromData(
+          chunkX, chunkY, data.mines, data.revealedIndices ?? new Set(), data.flaggedIndices ?? new Set(),
+        );
+      } else {
+        chunk = this.buildChunkFromData(chunkX, chunkY, mines, revealedIndices, flaggedIndices);
+      }
+      const buildMs = performance.now() - tBuild0;
+      if (dbMs > 2000) {
+        console.warn(
+          `[chunk] load (${chunkX},${chunkY}) db=${dbMs.toFixed(1)}ms build=${buildMs.toFixed(1)}ms ` +
+          `(slow — usually event-loop queue wait, not Mongo latency)`,
+        );
+      } else if (dbMs > 250) {
+        console.log(`[chunk] load (${chunkX},${chunkY}) db=${dbMs.toFixed(1)}ms build=${buildMs.toFixed(1)}ms`);
+      }
       this.chunks.set(chunkId, chunk);
       return chunk;
     }
@@ -107,22 +154,164 @@ export class ChunkManager implements IChunkManager {
     return chunk;
   }
 
-  public async preloadMany(docs: Array<{
+  public preloadMany(docs: Array<{
     chunkX: number;
     chunkY: number;
     mines?: Uint8Array;
-    revealedIndices: Set<number>;
-    flaggedIndices: Set<number>;
-  }>): Promise<void> {
-    for (const { chunkX, chunkY, mines, revealedIndices, flaggedIndices } of docs) {
+    revealedIndices?: Set<number>;
+    flaggedIndices?: Set<number>;
+    revealedBuf?: Buffer;
+    flaggedBuf?: Buffer;
+  }>): void {
+    for (const { chunkX, chunkY, mines, revealedIndices, flaggedIndices, revealedBuf, flaggedBuf } of docs) {
       const chunkId = this.getChunkId(chunkX, chunkY);
       if (this.chunks.has(chunkId)) continue;
-      this.chunks.set(chunkId, this.buildChunkFromData(chunkX, chunkY, mines, revealedIndices, flaggedIndices));
+      this.chunks.set(chunkId, this.buildChunkFromData(
+        chunkX, chunkY, mines,
+        revealedIndices ?? new Set(),
+        flaggedIndices ?? new Set(),
+        revealedBuf,
+        flaggedBuf,
+      ));
     }
   }
 
   public getChunkById(chunkId: string): IChunk | undefined {
     return this.chunks.get(chunkId);
+  }
+
+  public getDeferredBuffers(chunkId: string): { revealedBuf?: Buffer; flaggedBuf?: Buffer } | undefined {
+    return this.deferredChunks.get(chunkId);
+  }
+
+  public hasPendingFills(chunkX: number, chunkY: number): boolean {
+    return (this.pendingFills.get(this.getChunkId(chunkX, chunkY))?.length ?? 0) > 0;
+  }
+
+  public registerNoiseChunks(items: Array<{ chunkX: number; chunkY: number; mines: Uint8Array }>): void {
+    for (const { chunkX, chunkY, mines } of items) {
+      const chunkId = this.getChunkId(chunkX, chunkY);
+      if (this.chunks.has(chunkId) || this.deferredChunks.has(chunkId)) continue;
+      this.noiseMinesCache.set(chunkId, mines);
+    }
+  }
+
+  public registerDeferredChunks(items: Array<{
+    chunkX: number;
+    chunkY: number;
+    mines?: Uint8Array;
+    revealedBuf?: Buffer;
+    flaggedBuf?: Buffer;
+  }>): void {
+    for (const { chunkX, chunkY, mines, revealedBuf, flaggedBuf } of items) {
+      const chunkId = this.getChunkId(chunkX, chunkY);
+      if (this.chunks.has(chunkId)) continue;
+      this.deferredChunks.set(chunkId, { mines, revealedBuf, flaggedBuf });
+      this.noiseMinesCache.delete(chunkId);
+    }
+  }
+
+  public materializeChunk(chunkX: number, chunkY: number): IChunk {
+    const chunkId = this.getChunkId(chunkX, chunkY);
+    const existing = this.chunks.get(chunkId);
+    if (existing) return existing;
+
+    const deferred = this.deferredChunks.get(chunkId);
+    if (deferred) {
+      this.deferredChunks.delete(chunkId);
+      const chunk = this.buildChunkFromData(
+        chunkX, chunkY, deferred.mines, new Set(), new Set(), deferred.revealedBuf, deferred.flaggedBuf,
+      );
+      this.chunks.set(chunkId, chunk);
+      return chunk;
+    }
+
+    const mines = this.noiseMinesCache.get(chunkId);
+    if (mines) {
+      this.noiseMinesCache.delete(chunkId);
+      const chunk = this.buildChunkFromData(chunkX, chunkY, mines);
+      this.chunks.set(chunkId, chunk);
+      return chunk;
+    }
+
+    throw new Error(`Chunk (${chunkX},${chunkY}) is not loaded or deferred`);
+  }
+
+  public extractChunkBuffers(chunk: IChunk): {
+    mines: Uint8Array;
+    revealedBuf: Buffer;
+    flaggedBuf: Buffer;
+    hasPersistedState: boolean;
+  } {
+    return this.extractChunkBuffersInternal(chunk);
+  }
+
+  /** Drop materialized chunks nobody is subscribed to; does not retain buffers in memory. */
+  public releaseUnsubscribedChunks(): number {
+    let released = 0;
+    for (const chunkId of [...this.chunks.keys()]) {
+      const [chunkX, chunkY] = chunkId.split('_').map(Number);
+      if (this.hasActiveSubscribers(this.gameId, chunkX, chunkY)) continue;
+      if ((this.pendingFills.get(chunkId)?.length ?? 0) > 0) continue;
+
+      invalidateChunkWireCache(this.chunks.get(chunkId)!);
+      this.chunks.delete(chunkId);
+      released++;
+    }
+    return released;
+  }
+
+  /** @deprecated Use releaseUnsubscribedChunks after Mongo sync. Retains deferred/noise caches. */
+  public evictUnsubscribedChunks(): number {
+    let evicted = 0;
+    for (const chunkId of [...this.chunks.keys()]) {
+      const [chunkX, chunkY] = chunkId.split('_').map(Number);
+      if (this.hasActiveSubscribers(this.gameId, chunkX, chunkY)) continue;
+      if ((this.pendingFills.get(chunkId)?.length ?? 0) > 0) continue;
+
+      const chunk = this.chunks.get(chunkId)!;
+      const { mines, revealedBuf, flaggedBuf, hasPersistedState } = this.extractChunkBuffersInternal(chunk);
+      if (hasPersistedState) {
+        this.deferredChunks.set(chunkId, { mines, revealedBuf, flaggedBuf });
+      } else {
+        this.noiseMinesCache.set(chunkId, mines);
+      }
+      invalidateChunkWireCache(chunk);
+      this.chunks.delete(chunkId);
+      evicted++;
+    }
+    return evicted;
+  }
+
+  private extractChunkBuffersInternal(chunk: IChunk): {
+    mines: Uint8Array;
+    revealedBuf: Buffer;
+    flaggedBuf: Buffer;
+    hasPersistedState: boolean;
+  } {
+    const size = chunk.size;
+    const cells = size * size;
+    const mines = new Uint8Array(cells);
+    const revealedBuf = Buffer.alloc(cells, 0xff);
+    const flaggedBuf = Buffer.alloc(cells, 0xff);
+    let hasPersistedState = false;
+
+    for (let ly = 0; ly < size; ly++) {
+      for (let lx = 0; lx < size; lx++) {
+        const cell = chunk.tiles[ly][lx];
+        const idx = ly * size + lx;
+        mines[idx] = cell.isMine ? 0xff : cell.adjacentMines;
+        if (cell.revealed) {
+          revealedBuf[idx] = 0;
+          hasPersistedState = true;
+        }
+        if (cell.flagged) {
+          flaggedBuf[idx] = 0;
+          hasPersistedState = true;
+        }
+      }
+    }
+    return { mines, revealedBuf, flaggedBuf, hasPersistedState };
   }
 
   /**

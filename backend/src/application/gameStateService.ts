@@ -16,7 +16,16 @@ import { GetCellFunction } from '../domain/game';
 import { Server as SocketIOServer } from 'socket.io';
 import { IChunk } from '../types/chunkTypes';
 import { getGameRepository, getChunkRepository, getPendingFillsRepository } from '../infrastructure/persistence/db';
-import { ChunkRepository } from '../infrastructure/persistence/chunkRepository';
+import { ChunkRepository, chunkDocBuffer, ChunkDocument } from '../infrastructure/persistence/chunkRepository';
+import {
+  ChunkWireData,
+  emptyChunkWire,
+  invalidateChunkWireCache,
+  serializeChunkWire,
+  serializeChunkWireFromBuffers,
+} from './chunkWire';
+
+export { serializeChunk, serializeChunkWire } from './chunkWire';
 
 // Load the Rust native chunk generator if available. Falls back gracefully to
 // the JS WorldGenerator so development without a compiled addon still works.
@@ -36,35 +45,23 @@ try {
 // Define a reasonable cell size for the spatial hash grid chunks
 const SPATIAL_GRID_CELL_SIZE = 16;
 
-/**
- * Serializes a chunk to a compact wire format. Instead of sending all 1024 tile
- * objects, we send only sparse arrays for non-default state. Unrevealed, unflagged
- * cells are omitted — the client reconstructs them as the default state.
- */
-export function serializeChunk(chunk: IChunk, gameId: string) {
-    const [chunkX, chunkY] = chunk.id.split('_').map(Number);
-    const size = chunk.size;
-    const revealed: number[] = [];
-    const adjMines: number[] = [];
-    const revealedMines: number[] = [];
-    const flagged: number[] = [];
-    for (let ly = 0; ly < size; ly++) {
-        for (let lx = 0; lx < size; lx++) {
-            const cell = chunk.tiles[ly][lx];
-            const idx = ly * size + lx;
-            if (cell.revealed) {
-                if (cell.isMine) {
-                    revealedMines.push(idx);
-                } else {
-                    revealed.push(idx);
-                    adjMines.push(cell.adjacentMines);
-                }
-            } else if (cell.flagged) {
-                flagged.push(idx);
-            }
-        }
-    }
-    return { gameId, chunkX, chunkY, size, revealed, adjMines, revealedMines, flagged };
+/** Max flood-fill seeds processed per async drain pass (avoids one 8s BFS). */
+const MAX_FILL_SEEDS_PER_DRAIN = 256;
+/** Max cells revealed per BFS run; remainder is re-queued for the next pass. */
+const MAX_FILL_REVEALS_PER_RUN = 50_000;
+/** Max seeds re-queued when a fill pass hits the reveal cap. */
+const MAX_FILL_CONTINUATION_SEEDS = 256;
+/** Max pending fill coordinates queued per game. */
+const MAX_FILL_QUEUE_POINTS = 10_000;
+const MAX_PENDING_FILL_CHUNKS = 256;
+const MAX_PENDING_FILL_SEEDS_PER_CHUNK = 32;
+const WORLD_PLAYER_ID = '__world__';
+const BFS_YIELD_EVERY_STEPS = 2000;
+
+function packCoord(x: number, y: number): bigint {
+    const shift = BigInt(32);
+    const mask = (BigInt(1) << shift) - BigInt(1);
+    return (BigInt(x) << shift) | (BigInt(y) & mask);
 }
 
 export class GameStateService {
@@ -79,6 +76,14 @@ export class GameStateService {
     // are merged and dispatched as one BFS after the current run finishes.
     private fillQueues  = new Map<string, { x: number; y: number }[]>();
     private fillRunning = new Set<string>();
+    /** Persisted chunk _ids per game — avoids MongoDB round-trips for pure noise chunks. */
+    private persistedChunkIds = new Map<string, Set<string>>();
+    /** Coalesce concurrent loads of the same chunk (avoids pool stampede). */
+    private chunkLoadInflight = new Map<string, Promise<{
+        mines?: Uint8Array;
+        revealedBuf?: Buffer;
+        flaggedBuf?: Buffer;
+    } | null>>();
 
     constructor(io?: SocketIOServer) {
         console.log('[GameStateService] Constructor called');
@@ -301,8 +306,6 @@ export class GameStateService {
             if (!this.io) return false;
             const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
             const room = this.io.sockets.adapter.rooms.get(chunkRoom);
-            const size = room ? room.size : 0;
-            console.log(`[hasActiveSubscribers] gameId=${gameId}, chunk=(${chunkX},${chunkY}), chunkRoom=${chunkRoom}, size=${size}`);
             return !!room && room.size > 0;
         };
         const processAndBroadcastAllLoadedChunksUntilClean = async (chunkManager: ChunkManager) => {
@@ -326,7 +329,7 @@ export class GameStateService {
             while ((chunkManager.pendingFills.get(chunkId)?.length ?? 0) > 0) {
                 await chunkManager.processPendingFillsForChunk(chunkId, new Set<string>());
                 const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
-                this.io.to(chunkRoom).emit('chunkData', serializeChunk(chunk, gameId));
+                this.io.to(chunkRoom).emit('chunkData', serializeChunkWire(chunk, gameId));
             }
             await processAndBroadcastAllLoadedChunksUntilClean(chunkManager);
         };
@@ -334,22 +337,28 @@ export class GameStateService {
             if (!this.io) return;
             const [chunkX, chunkY] = chunk.id.split('_').map(Number);
             const chunkRoom = `${gameId}_chunk_${chunkX}_${chunkY}`;
-            this.io.to(chunkRoom).emit('chunkData', serializeChunk(chunk, gameId));
+            invalidateChunkWireCache(chunk);
+            this.io.to(chunkRoom).emit('chunkData', serializeChunkWire(chunk, gameId));
         };
-        const persistenceLoader: ChunkPersistenceLoader = async (chunkX, chunkY) => {
-            const doc = await getChunkRepository().load(gameId, chunkX, chunkY);
-            if (!doc) return null;
-            return {
-                mines: ChunkRepository.decodeMines(doc),
-                ...ChunkRepository.decode(doc),
-            };
-        };
+        const persistenceLoader: ChunkPersistenceLoader = (chunkX, chunkY) =>
+            this.loadChunkFromDb(gameId, chunkX, chunkY);
         const chunkMineGenerator = nativeAddon
             ? (chunkX: number, chunkY: number): Uint8Array =>
                 nativeAddon!.generateChunk(chunkX, chunkY, CHUNK_SIZE, seedStr)
             : undefined;
         const chunkManager = new ChunkManager(gameId, CHUNK_SIZE, cellGenerator, hasActiveSubscribers, processAndBroadcastChunk, broadcastChunkUpdate, persistenceLoader, chunkMineGenerator);
         this.chunkManagers.set(gameId, chunkManager);
+
+        try {
+            const ids = await getChunkRepository().listIds(gameId);
+            this.persistedChunkIds.set(gameId, ids);
+            if (ids.size > 0) {
+                console.log(`[createGame] Indexed ${ids.size} persisted chunks for game ${gameId}`);
+            }
+        } catch (err) {
+            console.error('[createGame] Failed to index persisted chunks:', err);
+            this.persistedChunkIds.set(gameId, new Set());
+        }
 
         // Restore persisted pendingFills so cross-chunk flood fills survive restarts
         try {
@@ -400,37 +409,67 @@ export class GameStateService {
         this.setGame(gameId, game);
     }
 
+    private ensureNoiseMines(
+        generatedMap: Map<string, Uint8Array>,
+        chunkX: number,
+        chunkY: number,
+        seed: string,
+    ): Uint8Array | undefined {
+        const key = `${chunkX}_${chunkY}`;
+        const existing = generatedMap.get(key);
+        if (existing) return existing;
+        if (!nativeAddon) return undefined;
+        const mines = new Uint8Array(nativeAddon.generateChunk(chunkX, chunkY, CHUNK_SIZE, seed));
+        generatedMap.set(key, mines);
+        return mines;
+    }
+
+    private resolveChunkMines(
+        doc: ChunkDocument | undefined,
+        chunkX: number,
+        chunkY: number,
+        generatedMap: Map<string, Uint8Array>,
+        seed: string,
+    ): Uint8Array | undefined {
+        const custom = doc ? ChunkRepository.decodeMines(doc) : undefined;
+        if (custom) return custom;
+        return this.ensureNoiseMines(generatedMap, chunkX, chunkY, seed);
+    }
+
     /**
      * Streams chunks to the caller one at a time as they are built, yielding the
      * event loop between each uncached chunk so other requests can be serviced.
      * Already-cached chunks are delivered synchronously before the DB round-trip.
-     * One DB query is used for all uncached chunks regardless of count.
+     * Only chunks known to exist in MongoDB are queried; pure noise chunks are generated locally.
      */
     async streamChunks(
         gameId: string,
         coords: { chunkX: number; chunkY: number }[],
-        onChunk: (chunk: IChunk) => void,
+        onChunk: (wire: ChunkWireData) => void,
     ): Promise<void> {
-        const chunkManager = this.getChunkManager(gameId);
+        const chunkManager = this.getChunkManager(gameId) as ChunkManager;
+        const persisted = this.persistedChunkIds.get(gameId) ?? new Set<string>();
 
-        // Deliver already-cached chunks immediately — zero build cost.
         const uncached: { chunkX: number; chunkY: number }[] = [];
         for (const { chunkX, chunkY } of coords) {
             const cached = chunkManager.getChunkById(chunkManager.getChunkId(chunkX, chunkY));
             if (cached) {
-                onChunk(cached);
+                invalidateChunkWireCache(cached);
+                onChunk(serializeChunkWire(cached, gameId));
             } else {
                 uncached.push({ chunkX, chunkY });
             }
         }
         if (uncached.length === 0) return;
 
-        // One DB round-trip for all uncached chunks.
-        const t0 = performance.now();
-        const docsMap = await getChunkRepository().loadMany(gameId, uncached);
-        const dbMs = (performance.now() - t0).toFixed(1);
+        const dbCoords = uncached.filter(c => persisted.has(`${gameId}_${c.chunkX}_${c.chunkY}`));
 
-        // Separate into chunks with DB data (load as-is) and fresh chunks (need generation).
+        const tDb = performance.now();
+        const docsMap = dbCoords.length > 0
+            ? await getChunkRepository().loadMany(gameId, dbCoords)
+            : new Map<string, ChunkDocument>();
+        const dbMs = (performance.now() - tDb).toFixed(1);
+
         const needGeneration: { chunkX: number; chunkY: number }[] = [];
         for (const coord of uncached) {
             if (!docsMap.has(`${gameId}_${coord.chunkX}_${coord.chunkY}`)) {
@@ -438,8 +477,6 @@ export class GameStateService {
             }
         }
 
-        // Generate all fresh chunks in parallel across CPU cores via Rust/Rayon.
-        // One native call replaces N sequential calls, completing in time of the slowest core.
         const seed = this.gameSeeds.get(gameId) ?? gameId;
         const tGen = performance.now();
         const generatedMap = new Map<string, Uint8Array>();
@@ -455,26 +492,122 @@ export class GameStateService {
         }
         const genMs = (performance.now() - tGen).toFixed(1);
 
-        // Stream chunks to the client. Yield every 20 chunks to keep the event
-        // loop available for other clients — generation is already done above.
-        let built = 0;
-        for (let i = 0; i < uncached.length; i++) {
-            const { chunkX, chunkY } = uncached[i];
+        const preloadBatch: Array<{
+            chunkX: number;
+            chunkY: number;
+            mines?: Uint8Array;
+            revealedBuf?: Buffer;
+            flaggedBuf?: Buffer;
+        }> = [];
+
+        for (const { chunkX, chunkY } of uncached) {
             const doc = docsMap.get(`${gameId}_${chunkX}_${chunkY}`);
-            const mines = doc
-                ? ChunkRepository.decodeMines(doc)
-                : generatedMap.get(`${chunkX}_${chunkY}`);
-            const { revealedIndices, flaggedIndices } = doc
-                ? ChunkRepository.decode(doc)
-                : { revealedIndices: new Set<number>(), flaggedIndices: new Set<number>() };
-            await chunkManager.preloadMany([{ chunkX, chunkY, mines, revealedIndices, flaggedIndices }]);
-            onChunk(chunkManager.getChunkById(chunkManager.getChunkId(chunkX, chunkY))!);
-            built++;
-            if (i % 20 === 19) await new Promise<void>(resolve => setImmediate(resolve));
+            const mustBuild = chunkManager.hasPendingFills(chunkX, chunkY);
+
+            if (mustBuild) {
+                preloadBatch.push({
+                    chunkX,
+                    chunkY,
+                    mines: this.resolveChunkMines(doc, chunkX, chunkY, generatedMap, seed),
+                    revealedBuf: doc ? chunkDocBuffer(doc.revealed) : undefined,
+                    flaggedBuf: doc ? chunkDocBuffer(doc.flagged) : undefined,
+                });
+                continue;
+            }
+
+            if (doc) {
+                continue;
+            }
+
+            if (!generatedMap.has(`${chunkX}_${chunkY}`)) {
+                preloadBatch.push({ chunkX, chunkY });
+            }
         }
-        // Final yield if the last batch wasn't a multiple of 20.
-        await new Promise<void>(resolve => setImmediate(resolve));
-        console.log(`[streamChunks] cached=${coords.length - uncached.length} built=${built} gen=${genMs}ms db=${dbMs}ms`);
+
+        const tBuild = performance.now();
+        chunkManager.preloadMany(preloadBatch);
+        const buildMs = (performance.now() - tBuild).toFixed(1);
+
+        let built = 0;
+        let deferred = 0;
+        let noise = 0;
+        for (const { chunkX, chunkY } of uncached) {
+            const chunkId = chunkManager.getChunkId(chunkX, chunkY);
+            const builtChunk = chunkManager.getChunkById(chunkId);
+            if (builtChunk) {
+                onChunk(serializeChunkWire(builtChunk, gameId));
+                built++;
+                continue;
+            }
+
+            const doc = docsMap.get(`${gameId}_${chunkX}_${chunkY}`);
+            if (doc) {
+                onChunk(serializeChunkWireFromBuffers(
+                    gameId,
+                    chunkX,
+                    chunkY,
+                    chunkDocBuffer(doc.revealed),
+                    chunkDocBuffer(doc.flagged),
+                    this.resolveChunkMines(doc, chunkX, chunkY, generatedMap, seed),
+                ));
+                deferred++;
+            } else {
+                onChunk(emptyChunkWire(gameId, chunkX, chunkY));
+                noise++;
+            }
+        }
+
+        console.log(
+            `[streamChunks] cached=${coords.length - uncached.length} built=${built} deferred=${deferred} noise=${noise} db=${dbMs}ms queried=${dbCoords.length} build=${buildMs}ms gen=${genMs}ms`
+        );
+    }
+
+    private markChunkPersisted(gameId: string, chunkX: number, chunkY: number): void {
+        let ids = this.persistedChunkIds.get(gameId);
+        if (!ids) {
+            ids = new Set();
+            this.persistedChunkIds.set(gameId, ids);
+        }
+        ids.add(`${gameId}_${chunkX}_${chunkY}`);
+    }
+
+    /** Load persisted chunk state; skips Mongo for known-noise chunks and coalesces concurrent loads. */
+    private loadChunkFromDb(
+        gameId: string,
+        chunkX: number,
+        chunkY: number,
+    ): Promise<{ mines?: Uint8Array; revealedBuf?: Buffer; flaggedBuf?: Buffer } | null> {
+        const docId = `${gameId}_${chunkX}_${chunkY}`;
+        const persisted = this.persistedChunkIds.get(gameId);
+        if (persisted && !persisted.has(docId)) {
+            return Promise.resolve(null);
+        }
+
+        const inflight = this.chunkLoadInflight.get(docId);
+        if (inflight) return inflight;
+
+        const loadPromise = (async () => {
+            const doc = await getChunkRepository().load(gameId, chunkX, chunkY);
+            if (!doc) {
+                persisted?.delete(docId);
+                return null;
+            }
+            this.markChunkPersisted(gameId, chunkX, chunkY);
+            return {
+                mines: ChunkRepository.decodeMines(doc),
+                revealedBuf: chunkDocBuffer(doc.revealed),
+                flaggedBuf: chunkDocBuffer(doc.flagged),
+            };
+        })();
+
+        this.chunkLoadInflight.set(docId, loadPromise);
+        void loadPromise.finally(() => {
+            if (this.chunkLoadInflight.get(docId) === loadPromise) {
+                this.chunkLoadInflight.delete(docId);
+            }
+        });
+
+        return loadPromise;
     }
 
     /**
@@ -488,12 +621,115 @@ export class GameStateService {
         if (points.length === 0) return;
 
         if (!this.fillQueues.has(gameId)) this.fillQueues.set(gameId, []);
-        this.fillQueues.get(gameId)!.push(...points);
+        const queue = this.fillQueues.get(gameId)!;
+        queue.push(...points);
+        if (queue.length > MAX_FILL_QUEUE_POINTS) {
+            queue.splice(0, queue.length - MAX_FILL_QUEUE_POINTS);
+        }
 
-        if (this.fillRunning.has(gameId)) return; // will be picked up after current run
+        if (this.fillRunning.has(gameId)) return;
         this.fillRunning.add(gameId);
 
         setImmediate(() => this.drainFillQueue(gameId, playerId));
+    }
+
+    evictUnsubscribedChunks(gameId: string): number {
+        void this.evictUnsubscribedChunksAsync(gameId);
+        return 0;
+    }
+
+    async evictUnsubscribedChunksAsync(gameId: string): Promise<number> {
+        const cm = this.chunkManagers.get(gameId) as ChunkManager | undefined;
+        if (!cm) return 0;
+
+        const chunkRepo = getChunkRepository();
+        let syncedCells = 0;
+        let syncedChunks = 0;
+
+        for (const chunkId of [...cm.chunks.keys()]) {
+            const [chunkX, chunkY] = chunkId.split('_').map(Number);
+            if (cm.hasActiveSubscribers(gameId, chunkX, chunkY)) continue;
+            if ((cm.pendingFills.get(chunkId)?.length ?? 0) > 0) continue;
+
+            const chunk = cm.chunks.get(chunkId);
+            if (!chunk) continue;
+
+            const { revealedBuf, flaggedBuf, hasPersistedState } = cm.extractChunkBuffers(chunk);
+            if (hasPersistedState) {
+                try {
+                    const result = await chunkRepo.syncChunkState(
+                        gameId, chunkX, chunkY, revealedBuf, flaggedBuf, WORLD_PLAYER_ID,
+                    );
+                    if (result.revealed > 0 || result.flagged > 0) {
+                        syncedCells += result.revealed;
+                        syncedChunks++;
+                        this.markChunkPersisted(gameId, chunkX, chunkY);
+                    }
+                } catch (err) {
+                    console.error(`[persist] evict-sync failed for ${chunkId}:`, err);
+                }
+            }
+        }
+
+        this.prunePendingFills(gameId, cm);
+        const evicted = cm.releaseUnsubscribedChunks();
+        if (syncedCells > 0 || evicted > 0) {
+            console.log(
+                `[persist] game=${gameId} evict-sync chunks=${syncedChunks} cells=${syncedCells} ` +
+                `released=${evicted} pending=${cm.pendingFills.size}`,
+            );
+        }
+        return evicted;
+    }
+
+    private prunePendingFills(gameId: string, cm: ChunkManager): void {
+        const fillsRepo = getPendingFillsRepository();
+
+        for (const [chunkId, entries] of cm.pendingFills) {
+            if (entries.length > MAX_PENDING_FILL_SEEDS_PER_CHUNK) {
+                entries.splice(0, entries.length - MAX_PENDING_FILL_SEEDS_PER_CHUNK);
+            }
+        }
+
+        for (const chunkId of [...cm.pendingFills.keys()]) {
+            const [chunkX, chunkY] = chunkId.split('_').map(Number);
+            const subscribed = cm.hasActiveSubscribers(gameId, chunkX, chunkY);
+            const materialized = cm.getChunkById(chunkId) !== undefined;
+            if (subscribed || materialized) continue;
+            cm.pendingFills.delete(chunkId);
+            void fillsRepo.delete(gameId, chunkId);
+        }
+
+        if (cm.pendingFills.size <= MAX_PENDING_FILL_CHUNKS) return;
+
+        const excess = cm.pendingFills.size - MAX_PENDING_FILL_CHUNKS;
+        const dropKeys = [...cm.pendingFills.keys()].slice(0, excess);
+        for (const chunkId of dropKeys) {
+            cm.pendingFills.delete(chunkId);
+            void fillsRepo.delete(gameId, chunkId);
+        }
+    }
+
+    private addPendingFillSeed(
+        cm: ChunkManager,
+        chunkId: string,
+        localX: number,
+        localY: number,
+        pendingFills: Set<string>,
+        cs: number,
+    ): void {
+        pendingFills.add(chunkId);
+        let fills = cm.pendingFills.get(chunkId);
+        if (!fills) {
+            fills = [];
+            cm.pendingFills.set(chunkId, fills);
+        }
+        const localIdx = localY * cs + localX;
+        for (let i = 0; i < fills.length; i++) {
+            if (fills[i].localY * cs + fills[i].localX === localIdx) return;
+        }
+        if (fills.length >= MAX_PENDING_FILL_SEEDS_PER_CHUNK) return;
+        fills.push({ localX, localY });
     }
 
     private async drainFillQueue(gameId: string, playerId?: string): Promise<void> {
@@ -503,12 +739,9 @@ export class GameStateService {
             return;
         }
 
-        // Drain all queued points into one merged BFS run.
-        const points = queue.splice(0);
-        const t0 = performance.now();
+        const points = queue.splice(0, MAX_FILL_SEEDS_PER_DRAIN);
         try {
             await this.runBulkFloodFill(gameId, points, playerId);
-            console.log(`[fills] ${points.length} points done in ${(performance.now() - t0).toFixed(1)}ms`);
         } catch (err) {
             console.error('[fills] error:', err);
         }
@@ -519,14 +752,14 @@ export class GameStateService {
             setImmediate(() => this.drainFillQueue(gameId, playerId));
         } else {
             this.fillRunning.delete(gameId);
+            await this.evictUnsubscribedChunksAsync(gameId);
         }
     }
 
     /**
      * Runs a single BFS flood fill seeded from multiple start points, applying all
      * results and broadcasting each affected chunk exactly once at the end.
-     * This is more efficient than calling runGlobalFloodFill per point because
-     * overlapping regions are merged into one pass and broadcasts are batched.
+     * MongoDB persistence runs asynchronously after broadcast so the hot path stays fast.
      */
     async runBulkFloodFill(
         gameId: string,
@@ -535,107 +768,238 @@ export class GameStateService {
     ): Promise<{ revealedCells: Cell[], pendingFills: Set<string> }> {
         const gameState = this.getGame(gameId);
         if (!gameState) throw new Error(`Game not found: ${gameId}`);
-        const chunkManager = this.getChunkManager(gameId);
-        const revealedCells: Cell[] = [];
-        const visited = new Set<string>();
+        const cm = this.getChunkManager(gameId) as ChunkManager;
+        const chunks = cm.chunks;
+        const revealedByChunk = new Map<string, { localX: number; localY: number }[]>();
+        let revealedCount = 0;
+        const visited = new Set<bigint>();
         const pendingFills = new Set<string>();
         const updatedChunkIds = new Set<string>();
+        const cs = CHUNK_SIZE;
+        const t0 = performance.now();
 
-        // Seed queue with all start points, deduplicating upfront
-        const queue: { x: number; y: number }[] = [];
+        const getChunk = (cx: number, cy: number): IChunk | null => {
+            const chunkId = cm.getChunkId(cx, cy);
+            let chunk = chunks.get(chunkId);
+            if (chunk) return chunk;
+            if (!cm.hasActiveSubscribers(gameId, cx, cy)) return null;
+            try {
+                chunk = cm.materializeChunk(cx, cy);
+                return chunk;
+            } catch {
+                return null;
+            }
+        };
+
+        const recordReveal = (chunkId: string, lx: number, ly: number) => {
+            revealedCount++;
+            let list = revealedByChunk.get(chunkId);
+            if (!list) {
+                list = [];
+                revealedByChunk.set(chunkId, list);
+            }
+            list.push({ localX: lx, localY: ly });
+            updatedChunkIds.add(chunkId);
+        };
+
+        const queueX: number[] = [];
+        const queueY: number[] = [];
+        let head = 0;
+
+        const tryEnqueue = (gx: number, gy: number): void => {
+            const key = packCoord(gx, gy);
+            if (visited.has(key)) return;
+            visited.add(key);
+
+            const cx = Math.floor(gx / cs);
+            const cy = Math.floor(gy / cs);
+            const lx = gx - cx * cs;
+            const ly = gy - cy * cs;
+            const chunkId = cm.getChunkId(cx, cy);
+            if (!chunks.has(chunkId)) {
+                if (!cm.hasActiveSubscribers(gameId, cx, cy)) {
+                    this.addPendingFillSeed(cm, chunkId, lx, ly, pendingFills, cs);
+                    return;
+                }
+                const chunk = getChunk(cx, cy);
+                if (!chunk) {
+                    this.addPendingFillSeed(cm, chunkId, lx, ly, pendingFills, cs);
+                    return;
+                }
+            }
+
+            const cell = chunks.get(chunkId)!.tiles[ly][lx];
+            if (cell.revealed || cell.flagged || cell.isMine) return;
+
+            queueX.push(gx);
+            queueY.push(gy);
+        };
+
         for (const { x, y } of startPoints) {
-            const key = `${x},${y}`;
-            if (!visited.has(key)) { visited.add(key); queue.push({ x, y }); }
+            tryEnqueue(x, y);
         }
 
         let steps = 0;
-        while (queue.length > 0) {
-            // Yield every 500 steps so the event loop can handle other requests
-            // during large flood fills (e.g. the SweepTogether open region).
-            if (++steps % 2000 === 0) await new Promise<void>(r => setImmediate(r));
+        let capped = false;
+        while (head < queueX.length) {
+            if (++steps % BFS_YIELD_EVERY_STEPS === 0) await new Promise<void>(r => setImmediate(r));
+            if (revealedCount >= MAX_FILL_REVEALS_PER_RUN) {
+                capped = true;
+                break;
+            }
 
-            const { x, y } = queue.shift()!;
-            const { chunkCoordinate: cc, localCoordinate: lc } = chunkManager.convertGlobalToChunkLocalCoordinates(x, y);
-            const cellChunk = chunkManager.getChunkById(chunkManager.getChunkId(cc.x, cc.y));
-            const cell = cellChunk?.getTile(lc.x, lc.y) ?? null;
-            if (!cell || cell.revealed || cell.flagged || cell.isMine) continue;
+            const x = queueX[head];
+            const y = queueY[head];
+            head++;
 
-            const revealedCell: Cell = { ...cell, revealed: true, flagged: false };
-            revealedCells.push(revealedCell);
-            // Update tile in place so later BFS steps read the correct state
-            cellChunk!.setTile(lc.x, lc.y, revealedCell);
-            updatedChunkIds.add(chunkManager.getChunkId(cc.x, cc.y));
+            const cx = Math.floor(x / cs);
+            const cy = Math.floor(y / cs);
+            const lx = x - cx * cs;
+            const ly = y - cy * cs;
+            const chunkId = cm.getChunkId(cx, cy);
+            const chunk = chunks.get(chunkId);
+            if (!chunk) continue;
 
-            if (revealedCell.adjacentMines === 0) {
+            const cell = chunk.tiles[ly][lx];
+            if (cell.revealed || cell.flagged || cell.isMine) continue;
+
+            cell.revealed = true;
+            cell.flagged = false;
+            recordReveal(chunkId, lx, ly);
+
+            if (cell.adjacentMines !== 0) continue;
+
+            for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
-                    for (let dy = -1; dy <= 1; dy++) {
-                        if (dx === 0 && dy === 0) continue;
-                        const nx = x + dx, ny = y + dy;
-                        const key = `${nx},${ny}`;
-                        if (!visited.has(key)) {
-                            visited.add(key);
-                            const { chunkCoordinate } = chunkManager.convertGlobalToChunkLocalCoordinates(nx, ny);
-                            const chunkId = chunkManager.getChunkId(chunkCoordinate.x, chunkCoordinate.y);
-                            if (chunkManager.chunks.has(chunkId)) {
-                                queue.push({ x: nx, y: ny });
-                            } else {
-                                pendingFills.add(chunkId);
-                                const { localCoordinate } = chunkManager.convertGlobalToChunkLocalCoordinates(nx, ny);
-                                if (!chunkManager.pendingFills.has(chunkId)) chunkManager.pendingFills.set(chunkId, []);
-                                chunkManager.pendingFills.get(chunkId)!.push({ localX: localCoordinate.x, localY: localCoordinate.y });
-                            }
-                        }
-                    }
+                    if (dx === 0 && dy === 0) continue;
+                    tryEnqueue(x + dx, y + dy);
                 }
             }
         }
 
-        // Sync spatialGrid
-        this.updateGridCells(gameId, revealedCells);
+        const bfsMs = performance.now() - t0;
 
-        // Persist revealed cells grouped by chunk
-        if (playerId && revealedCells.length > 0) {
-            try {
-                const chunkRepo = getChunkRepository();
-                const byChunk = new Map<string, { chunkX: number; chunkY: number; cells: { localX: number; localY: number }[] }>();
-                for (const cell of revealedCells) {
-                    const { chunkCoordinate, localCoordinate } = chunkManager.convertGlobalToChunkLocalCoordinates(cell.x, cell.y);
-                    const key = `${chunkCoordinate.x}_${chunkCoordinate.y}`;
-                    if (!byChunk.has(key)) byChunk.set(key, { chunkX: chunkCoordinate.x, chunkY: chunkCoordinate.y, cells: [] });
-                    byChunk.get(key)!.cells.push({ localX: localCoordinate.x, localY: localCoordinate.y });
-                }
-                for (const { chunkX, chunkY, cells } of byChunk.values()) {
-                    await chunkRepo.ensure(gameId, chunkX, chunkY);
-                    const playerIndex = await chunkRepo.getOrAddPlayerIndex(gameId, chunkX, chunkY, playerId);
-                    await chunkRepo.revealCells(gameId, chunkX, chunkY, cells, playerIndex);
-                }
-            } catch (err) {
-                console.error('[runBulkFloodFill] Failed to persist revealed cells:', err);
-            }
-        }
-
-        // Persist new pendingFills
-        if (pendingFills.size > 0) {
-            try {
-                const fillsRepo = getPendingFillsRepository();
-                for (const chunkId of pendingFills) {
-                    const entries = chunkManager.pendingFills.get(chunkId) ?? [];
-                    await fillsRepo.save(gameId, chunkId, entries);
-                }
-            } catch (err) {
-                console.error('[runBulkFloodFill] Failed to persist pendingFills:', err);
-            }
-        }
-
-        // Broadcast each affected chunk exactly once
         for (const chunkId of updatedChunkIds) {
-            const chunk = chunkManager.getChunkById(chunkId);
-            if (chunk && chunkManager.broadcastChunkUpdate) {
-                chunkManager.broadcastChunkUpdate(chunk);
+            const chunk = chunks.get(chunkId);
+            if (chunk && cm.broadcastChunkUpdate) {
+                invalidateChunkWireCache(chunk);
+                cm.broadcastChunkUpdate(chunk);
             }
         }
+
+        if (capped && head < queueX.length) {
+            const continuation: { x: number; y: number }[] = [];
+            for (let i = head; i < queueX.length && continuation.length < MAX_FILL_CONTINUATION_SEEDS; i++) {
+                continuation.push({ x: queueX[i], y: queueY[i] });
+            }
+            if (continuation.length > 0) {
+                setImmediate(() => this.enqueueFill(gameId, continuation, playerId));
+            }
+        }
+
+        const revealedCells = this.buildRevealedCells(cm, revealedByChunk, cs);
+        await this.persistBulkFillResults(gameId, cm, updatedChunkIds, pendingFills, playerId);
+        this.prunePendingFills(gameId, cm);
+
+        const totalMs = performance.now() - t0;
+        const evicted = await this.evictUnsubscribedChunksAsync(gameId);
+        console.log(
+            `[fills] seeds=${startPoints.length} revealed=${revealedCount} chunks=${updatedChunkIds.size} bfs=${bfsMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms${capped ? ' capped' : ''} evicted=${evicted}`
+        );
 
         return { revealedCells, pendingFills };
+    }
+
+    private buildRevealedCells(
+        cm: ChunkManager,
+        revealedByChunk: Map<string, { localX: number; localY: number }[]>,
+        cs: number,
+    ): Cell[] {
+        const cells: Cell[] = [];
+        for (const [chunkId, locals] of revealedByChunk) {
+            const chunk = cm.getChunkById(chunkId);
+            const [chunkX, chunkY] = chunkId.split('_').map(Number);
+            for (const { localX, localY } of locals) {
+                const cell = chunk?.getTile(localX, localY);
+                if (cell) {
+                    cells.push(cell);
+                } else {
+                    cells.push({
+                        x: chunkX * cs + localX,
+                        y: chunkY * cs + localY,
+                        revealed: true,
+                        flagged: false,
+                        isMine: false,
+                        adjacentMines: 0,
+                    });
+                }
+            }
+        }
+        return cells;
+    }
+
+    private async persistBulkFillResults(
+        gameId: string,
+        chunkManager: ChunkManager,
+        updatedChunkIds: Set<string>,
+        pendingFillChunkIds: Set<string>,
+        playerId?: string,
+    ): Promise<void> {
+        const persistPlayerId = playerId ?? WORLD_PLAYER_ID;
+        let cellCount = 0;
+        let chunkCount = 0;
+
+        try {
+            if (updatedChunkIds.size > 0) {
+                const chunkRepo = getChunkRepository();
+                await Promise.all([...updatedChunkIds].map(async (chunkId) => {
+                    const chunk = chunkManager.getChunkById(chunkId);
+                    let revealedBuf: Buffer | undefined;
+                    let flaggedBuf: Buffer | undefined;
+
+                    if (chunk) {
+                        const extracted = chunkManager.extractChunkBuffers(chunk);
+                        if (!extracted.hasPersistedState) return;
+                        revealedBuf = extracted.revealedBuf;
+                        flaggedBuf = extracted.flaggedBuf;
+                    } else {
+                        const deferred = chunkManager.getDeferredBuffers(chunkId);
+                        if (!deferred?.revealedBuf && !deferred?.flaggedBuf) return;
+                        revealedBuf = deferred.revealedBuf ?? Buffer.alloc(CHUNK_SIZE * CHUNK_SIZE, 0xff);
+                        flaggedBuf = deferred.flaggedBuf ?? Buffer.alloc(CHUNK_SIZE * CHUNK_SIZE, 0xff);
+                    }
+
+                    const [chunkX, chunkY] = chunkId.split('_').map(Number);
+                    const result = await chunkRepo.syncChunkState(
+                        gameId, chunkX, chunkY, revealedBuf, flaggedBuf, persistPlayerId,
+                    );
+                    if (result.revealed > 0 || result.flagged > 0) {
+                        this.markChunkPersisted(gameId, chunkX, chunkY);
+                        cellCount += result.revealed;
+                        chunkCount++;
+                    }
+                }));
+            }
+            const pendingCount = pendingFillChunkIds.size;
+            if (pendingCount > 0) {
+                const fillsRepo = getPendingFillsRepository();
+                await Promise.all([...pendingFillChunkIds].map(async (chunkId) => {
+                    const [chunkX, chunkY] = chunkId.split('_').map(Number);
+                    if (!chunkManager.hasActiveSubscribers(gameId, chunkX, chunkY)) return;
+                    const entries = chunkManager.pendingFills.get(chunkId) ?? [];
+                    if (entries.length === 0) {
+                        await fillsRepo.delete(gameId, chunkId);
+                        return;
+                    }
+                    await fillsRepo.save(gameId, chunkId, entries);
+                }));
+            }
+            if (cellCount > 0 || pendingCount > 0) {
+                console.log(`[persist] game=${gameId} chunks=${chunkCount} cells=${cellCount} pending=${pendingCount}`);
+            }
+        } catch (err) {
+            console.error('[persist]', err);
+        }
     }
 
     /**
