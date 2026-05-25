@@ -3,13 +3,21 @@ services:
     build:
       context: ./backend
       args:
-        NODE_ENV: production
+        NODE_ENV: development
+    restart: unless-stopped
     ports:
       - "3001:3000"
+    volumes:
+      # Mount src only — preserves image-built native/index.node (Rust chunk gen)
+      - ./backend/src:/usr/src/app/src
+      - /usr/src/app/node_modules
+      - /usr/src/app/native
+    command: npx nodemon --legacy-watch --watch src --ext ts --exec ts-node src/infrastructure/network/server.ts --exitcrash
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=development
       - MONGODB_URI=mongodb://mongo_user:mongo_password@mongo:27017/minesweeper_infinite?authSource=admin
       - DB_NAME=minesweeper_infinite
+      - NODE_OPTIONS=--max-old-space-size=4096
     depends_on:
       - mongo
     networks:
@@ -17,8 +25,12 @@ services:
 
   frontend:
     build: ./frontend
+    command: ["npm", "run", "dev", "--", "--host"]
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     ports:
-      - "3000:80"
+      - "3000:3000"
     networks:
       - minesweeper-net
 
@@ -40,36 +52,34 @@ services:
   nginx:
     image: nginx:stable-alpine
     ports:
-      - "8080:80" # Main entry point
+      - "8080:80"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      # Wait for frontend service container to start
       frontend:
         condition: service_started
-      # Wait for backend container to start
       backend:
         condition: service_started
     networks:
       - minesweeper-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 5s
+      start_period: 45s
 
   mongo:
-    image: mongo:latest # Use official MongoDB image
+    image: mongo:latest
     environment:
-      MONGO_INITDB_ROOT_USERNAME: mongo_user # Example user
-      MONGO_INITDB_ROOT_PASSWORD: mongo_password # Example password
-      MONGO_INITDB_DATABASE: minesweeper_infinite # Database to initialize
+      MONGO_INITDB_ROOT_USERNAME: mongo_user
+      MONGO_INITDB_ROOT_PASSWORD: mongo_password
+      MONGO_INITDB_DATABASE: minesweeper_infinite
     volumes:
-      - mongo_data:/data/db # Persist MongoDB data
+      - mongo_data:/data/db
     ports:
-      - "27017:27017" # Expose MongoDB port
+      - "27017:27017"
     networks:
       - minesweeper-net
 
@@ -93,7 +103,6 @@ services:
       - ./cypress/screenshots:/e2e/cypress/screenshots
       - ./cypress/videos:/e2e/cypress/videos
     depends_on:
-      # Depends on the main proxy
       nginx:
         condition: service_started
     networks:
@@ -102,7 +111,6 @@ services:
       - CYPRESS_BASE_URL=http://nginx:80
     command: npx cypress run --browser chrome --headless
 
-  # Integration tests sidecar container
   integration-tests:
     build:
       context: .
@@ -118,7 +126,6 @@ services:
       - RETRY_INTERVAL=10
       - TEST_PATTERN=integration-tests/*.spec.js
       - DEBUG=false
-    # Exit after tests complete
     restart: "no"
 
 volumes:

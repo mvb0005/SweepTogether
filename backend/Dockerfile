@@ -18,7 +18,7 @@ ARG NODE_ENV=development
 ENV NODE_ENV=${NODE_ENV}
 
 COPY package*.json ./
-RUN npm install --include=dev
+RUN npm install
 
 COPY . .
 
@@ -31,4 +31,4 @@ RUN if [ "$NODE_ENV" = "production" ]; then \
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["npm", "run", "dev"]

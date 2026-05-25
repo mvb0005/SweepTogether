@@ -11,9 +11,9 @@ Real-time multiplayer Minesweeper with an infinite, persistent world. Players sh
 ## Running Locally (Docker)
 
 ```bash
-docker-compose up --build   # Main dev environment — access at http://localhost:8080
+docker compose up --build   # Dev — Vite HMR + nodemon at http://localhost:8080
+docker compose -f docker-compose.prod.yml up --build   # Production build
 cd backend && npm test       # Backend unit tests
-cd backend && npm test -- --coverage  # With coverage
 ```
 
 ## Architecture
