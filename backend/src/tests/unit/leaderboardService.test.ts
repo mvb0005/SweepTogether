@@ -56,7 +56,10 @@ describe('LeaderboardService', () => {
         id: testPlayerId,
         username: 'TestPlayer',
         score: 100,
-        status: PlayerStatus.ACTIVE
+        status: PlayerStatus.ACTIVE,
+        x: 0,
+        y: 0,
+        color: '#000000'
       }
     },
     mineReveals: [],
