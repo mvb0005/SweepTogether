@@ -1,4 +1,5 @@
 import { IChunk, CHUNK_SIZE } from '../types/chunkTypes';
+import { getChunkBuffers } from '../domain/chunkBuffers';
 
 export interface ChunkWireData {
   gameId: string;
@@ -60,6 +61,15 @@ export function serializeChunkWire(chunk: IChunk, gameId: string): ChunkWireData
   if (cached) return cached;
 
   const [chunkX, chunkY] = chunk.id.split('_').map(Number);
+  const bufs = getChunkBuffers(chunk);
+  if (bufs) {
+    const wire = serializeChunkWireFromBuffers(
+      gameId, chunkX, chunkY, bufs.revealed, bufs.flagged, bufs.mines,
+    );
+    wireCache.set(chunk, wire);
+    return wire;
+  }
+
   const size = chunk.size;
   const revealed: number[] = [];
   const adjMines: number[] = [];

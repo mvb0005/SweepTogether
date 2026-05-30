@@ -1,6 +1,6 @@
 import React from 'react';
 import { useViewportContext } from '../contexts/ViewportContext';
-import { useTelemetry } from '../contexts/TelemetryContext';
+import { usePlayerContext } from '../contexts/PlayerContext';
 
 interface GameHudProps {
   isConnected: boolean;
@@ -15,10 +15,10 @@ const GameHud: React.FC<GameHudProps> = ({
   loadedChunkCount,
   isInitialLoad,
 }) => {
-  const { viewport, scale, hoverCell } = useViewportContext();
-  const { enabled, config } = useTelemetry();
-  const centerX = Math.round(viewport.center.x);
-  const centerY = Math.round(viewport.center.y);
+  const { scale, hoverCell } = useViewportContext();
+  const { self } = usePlayerContext();
+  const posX = self?.x ?? 0;
+  const posY = self?.y ?? 0;
 
   return (
     <div className="game-hud" role="status">
@@ -27,14 +27,9 @@ const GameHud: React.FC<GameHudProps> = ({
         <span className={`game-hud__pill ${isConnected ? 'game-hud__pill--ok' : ''}`}>
           {isConnected ? 'Connected' : 'Reconnecting…'}
         </span>
-        {enabled && (
-          <span className="game-hud__pill game-hud__pill--ab" title="A/B experiment cohort">
-            AB:{config.variant}
-          </span>
-        )}
       </div>
       <div className="game-hud__row game-hud__stats">
-        <span>Center ({centerX}, {centerY})</span>
+        <span>Pos ({posX}, {posY})</span>
         <span>Zoom {Math.round(scale * 100)}%</span>
         <span>Chunks {loadedChunkCount}</span>
         {hoverCell && (
@@ -50,7 +45,7 @@ const GameHud: React.FC<GameHudProps> = ({
         </div>
       )}
       <div className="game-hud__help">
-        Drag pan · Click reveal · Right-click flag · Double-click chord · WASD move · Wheel zoom
+        WASD / arrows move · Click reveal · Right-click flag · Double-click chord · Wheel zoom
       </div>
     </div>
   );

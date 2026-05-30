@@ -78,6 +78,7 @@ web_modules/
 .env.test.local
 .env.production.local
 .env.local
+frontend/.env.development
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -131,6 +132,7 @@ docker-compose.override.yml
 
 # Build output
 backend/dist/
+backend/profiles/
 frontend/dist/
 
 # Integration test reports
@@ -142,3 +144,4 @@ reports/
 
 # Rust native addon build artifacts
 backend/native/target/
+backend/native/index.node

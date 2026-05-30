@@ -4,7 +4,8 @@ import { Server } from "socket.io";
 import path from 'path';
 
 // Import the refactored socket handler registration function
-import { registerSocketHandlers } from './socketHandlers'; 
+import { registerSocketHandlers } from './socketHandlers';
+import { createDiscordRoutes } from './discordRoutes';
 
 // Import DB functions and repository implementation
 import { connectToDatabase, disconnectFromDatabase, MongoGameRepository } from '../persistence/db'; 
@@ -16,14 +17,19 @@ const app = express();
 
 // Middleware to parse JSON bodies
 app.use(express.json());
+app.use('/api', createDiscordRoutes());
+
+const corsOrigins = (process.env.SOCKET_CORS_ORIGINS ?? 'http://localhost:8080,http://localhost:3000')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
 
 const server = http.createServer(app);
-// Configure Socket.IO with CORS settings
 const io = new Server(server, {
     cors: {
-        origin: "http://localhost:8080", // Allow requests from the frontend origin
-        methods: ["GET", "POST"]
-    }
+        origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
+        methods: ["GET", "POST"],
+    },
 });
 
 const PORT = process.env.PORT || 3000;

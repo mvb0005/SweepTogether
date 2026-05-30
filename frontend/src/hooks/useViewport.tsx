@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Coordinates, ViewportState } from '../types';
 
 interface UseViewportProps {
@@ -17,7 +17,6 @@ interface UseViewportReturn {
   handlePanStart: (clientX: number, clientY: number) => void;
   handlePanMove: (clientX: number, clientY: number) => void;
   handlePanEnd: () => void;
-  handleKeyboardPan: (direction: 'up' | 'down' | 'left' | 'right') => void;
   setCenterPosition: (x: number, y: number) => void;
   resizeTo: (width: number, height: number) => void;
 }
@@ -47,8 +46,6 @@ export function useViewport({
   // Use a ref to store the previous center position to avoid unnecessary updates
   const prevCenterRef = useRef<Coordinates>(initialCenter);
   
-  const KEYBOARD_PAN_AMOUNT = 3;
-
   // Update the viewport state
   const updateViewport = useCallback((newViewport: Partial<ViewportState>) => {
     setViewport(prev => {
@@ -154,89 +151,9 @@ export function useViewport({
 
   // End panning - Make sure to finalize any pending viewport update
   const handlePanEnd = useCallback(() => {
-    if (isPanning && panStart) {
-      // Ensure we call onViewportChange one last time with the final position
-      if (onViewportChange && 
-          (prevCenterRef.current.x !== viewport.center.x || 
-           prevCenterRef.current.y !== viewport.center.y)) {
-        onViewportChange(viewport);
-        prevCenterRef.current = viewport.center;
-      }
-    }
-    
     setIsPanning(false);
     setPanStart(null);
-  }, [isPanning, panStart, viewport, onViewportChange]);
-
-  // Handle keyboard panning (WASD or arrow keys)
-  const handleKeyboardPan = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
-    setViewport(prev => {
-      const newCenter = { ...prev.center };
-      
-      switch (direction) {
-        case 'up':
-          newCenter.y -= KEYBOARD_PAN_AMOUNT;
-          break;
-        case 'down':
-          newCenter.y += KEYBOARD_PAN_AMOUNT;
-          break;
-        case 'left':
-          newCenter.x -= KEYBOARD_PAN_AMOUNT;
-          break;
-        case 'right':
-          newCenter.x += KEYBOARD_PAN_AMOUNT;
-          break;
-      }
-      
-      // Update our ref for comparison
-      prevCenterRef.current = newCenter;
-      
-      const updated = { ...prev, center: newCenter };
-      if (onViewportChange) {
-        onViewportChange(updated);
-      }
-      return updated;
-    });
-  }, [onViewportChange, KEYBOARD_PAN_AMOUNT]);
-
-  // Set up global keyboard listeners for WASD/arrow key panning
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle keyboard navigation if we're not in an input field
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
-      
-      switch (e.key) {
-        case 'ArrowUp':
-        case 'w':
-        case 'W':
-          handleKeyboardPan('up');
-          break;
-        case 'ArrowDown':
-        case 's':
-        case 'S':
-          handleKeyboardPan('down');
-          break;
-        case 'ArrowLeft':
-        case 'a':
-        case 'A':
-          handleKeyboardPan('left');
-          break;
-        case 'ArrowRight':
-        case 'd':
-        case 'D':
-          handleKeyboardPan('right');
-          break;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [handleKeyboardPan]);
+  }, []);
 
   return {
     viewport,
@@ -246,7 +163,6 @@ export function useViewport({
     handlePanStart,
     handlePanMove,
     handlePanEnd,
-    handleKeyboardPan,
     setCenterPosition,
     resizeTo,
   };

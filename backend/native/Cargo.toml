@@ -9,7 +9,6 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "2", default-features = false, features = ["napi4"] }
 napi-derive = "2"
-noise = "0.9"
 rayon = "1"
 
 [build-dependencies]

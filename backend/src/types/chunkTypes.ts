@@ -48,6 +48,7 @@ export interface IChunk {
   // Methods
   getTile(localX: number, localY: number): Cell | undefined;
   setTile(localX: number, localY: number, cell: Cell): void;
+  getChunkBuffers?(): { mines: Uint8Array; revealed: Buffer; flagged: Buffer };
   executeLocalFloodFill(startX: number, startY: number, originalMineCountHint: number | undefined, boardManager: IChunkManager, visited?: Set<string>): Promise<FloodFillResult>;
 }
 

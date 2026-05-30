@@ -67,3 +67,9 @@ perf-chunks-burst:
 
 perf-chunks-fill:
 	cd backend && npm run perf:chunks:fill
+
+profile-flame:
+	cd backend && npm run profile:flame
+
+profile-flame-top:
+	cd backend && npm run profile:flame:top

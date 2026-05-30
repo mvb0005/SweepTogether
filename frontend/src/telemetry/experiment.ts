@@ -4,12 +4,12 @@ const STORAGE_KEY = 'sweep_ab_variant';
 const SESSION_KEY = 'sweep_telemetry_session';
 
 const LEGACY: Omit<ExperimentConfig, 'variant'> = {
-  chunkBuffer: 12,
+  chunkBuffer: 4,
   bufferDebounceMs: 0,
 };
 
 const OPTIMIZED: Omit<ExperimentConfig, 'variant'> = {
-  chunkBuffer: 12,
+  chunkBuffer: 4,
   bufferDebounceMs: 150,
 };
 
@@ -38,7 +38,7 @@ export function resolveVariant(): AbVariant {
   const stored = parseVariant(localStorage.getItem(STORAGE_KEY));
   if (stored) return stored;
 
-  const assigned: AbVariant = Math.random() < 0.5 ? 'control' : 'treatment';
+  const assigned: AbVariant = 'treatment';
   localStorage.setItem(STORAGE_KEY, assigned);
   return assigned;
 }

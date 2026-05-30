@@ -1,79 +1,171 @@
-#![deny(clippy::all)]
+mod chunk_gen;
+mod flood_fill;
 
+use chunk_gen::generate_chunk_inner;
+use flood_fill::{flood_fill, ChunkSlot, FloodFillOutput};
+use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use noise::{NoiseFn, OpenSimplex};
 use rayon::prelude::*;
+use std::collections::HashSet;
 
-/// Sampling scale applied to world coordinates before evaluation.
-/// Values of 1.0 land on integer lattice points where OpenSimplex is near-zero.
-/// 0.08 gives roughly one noise feature per ~12 cells — good variation for gameplay.
-const COORDINATE_SCALE: f64 = 0.08;
-/// Mine if scaled noise < threshold. With OpenSimplex the practical output
-/// range is narrower than ±1; ~0.25 threshold gives roughly 15% mine density.
-const MINE_THRESHOLD: f64 = 0.25;
-
-/// FNV-1a hash of the seed string to produce a u32 noise seed.
-fn seed_u32(s: &str) -> u32 {
-    let mut h: u32 = 2_166_136_261;
-    for b in s.bytes() {
-        h ^= b as u32;
-        h = h.wrapping_mul(16_777_619);
-    }
-    h
+#[napi(object)]
+pub struct FloodFillChunkInput {
+    pub chunk_x: i32,
+    pub chunk_y: i32,
+    pub mines: Buffer,
+    pub revealed: Buffer,
+    pub flagged: Buffer,
 }
 
-fn generate_chunk_inner(chunk_x: i32, chunk_y: i32, size: usize, noise: &OpenSimplex) -> Vec<u8> {
-    let mut mines = vec![false; size * size];
-    for ly in 0..size {
-        for lx in 0..size {
-            let wx = (chunk_x as f64 * size as f64 + lx as f64) * COORDINATE_SCALE;
-            let wy = (chunk_y as f64 * size as f64 + ly as f64) * COORDINATE_SCALE;
-            mines[ly * size + lx] = (noise.get([wx, wy]) + 1.0) / 2.0 < MINE_THRESHOLD;
-        }
+#[napi(object)]
+pub struct FloodFillOptions {
+    pub chunk_size: u32,
+    pub max_reveals: u32,
+    pub reveal_value: u8,
+    pub hidden_revealed: u8,
+    pub hidden_flagged: u8,
+    pub seeds: Vec<Vec<i32>>,
+    pub subscribed: Vec<Vec<i32>>,
+    pub chunks: Vec<FloodFillChunkInput>,
+}
+
+#[napi(object)]
+pub struct ChunkRevealOutput {
+    pub chunk_x: i32,
+    pub chunk_y: i32,
+    pub indices: Vec<u32>,
+}
+
+#[napi(object)]
+pub struct PendingFillOutput {
+    pub chunk_x: i32,
+    pub chunk_y: i32,
+    pub local_x: i32,
+    pub local_y: i32,
+}
+
+#[napi(object)]
+pub struct FloodFillResult {
+    pub revealed_count: u32,
+    pub capped: bool,
+    pub reveals: Vec<ChunkRevealOutput>,
+    pub pending_fills: Vec<PendingFillOutput>,
+    pub continuation: Vec<Vec<i32>>,
+}
+
+pub fn to_napi_result(out: FloodFillOutput) -> FloodFillResult {
+    FloodFillResult {
+        revealed_count: out.revealed_count,
+        capped: out.capped,
+        reveals: out
+            .reveals
+            .into_iter()
+            .map(|r| ChunkRevealOutput {
+                chunk_x: r.chunk_x,
+                chunk_y: r.chunk_y,
+                indices: r.indices,
+            })
+            .collect(),
+        pending_fills: out
+            .pending_fills
+            .into_iter()
+            .map(|p| PendingFillOutput {
+                chunk_x: p.chunk_x,
+                chunk_y: p.chunk_y,
+                local_x: p.local_x,
+                local_y: p.local_y,
+            })
+            .collect(),
+        continuation: out
+            .continuation
+            .into_iter()
+            .map(|(x, y)| vec![x, y])
+            .collect(),
+    }
+}
+
+pub fn parse_coord_pairs(pairs: &[Vec<i32>]) -> Vec<(i32, i32)> {
+    pairs
+        .iter()
+        .filter_map(|pair| {
+            if pair.len() >= 2 {
+                Some((pair[0], pair[1]))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+pub fn compute_flood_fill(opts: &FloodFillOptions) -> Result<FloodFillOutput> {
+    let cs = opts.chunk_size as i32;
+    if cs <= 0 {
+        return Err(Error::from_reason("chunk_size must be positive"));
     }
 
-    let mut out = vec![0u8; size * size];
-    for ly in 0..size {
-        for lx in 0..size {
-            let idx = ly * size + lx;
-            if mines[idx] {
-                out[idx] = 0xFF;
-            } else {
-                let mut adj = 0u8;
-                for dy in -1i32..=1 {
-                    for dx in -1i32..=1 {
-                        if dx == 0 && dy == 0 {
-                            continue;
-                        }
-                        let nx = lx as i32 + dx;
-                        let ny = ly as i32 + dy;
-                        let is_mine =
-                            if nx >= 0 && nx < size as i32 && ny >= 0 && ny < size as i32 {
-                                mines[ny as usize * size + nx as usize]
-                            } else {
-                                let wx =
-                                    (chunk_x as f64 * size as f64 + nx as f64) * COORDINATE_SCALE;
-                                let wy =
-                                    (chunk_y as f64 * size as f64 + ny as f64) * COORDINATE_SCALE;
-                                (noise.get([wx, wy]) + 1.0) / 2.0 < MINE_THRESHOLD
-                            };
-                        if is_mine {
-                            adj += 1;
-                        }
-                    }
-                }
-                out[idx] = adj;
-            }
-        }
+    let seeds = parse_coord_pairs(&opts.seeds);
+    let subscribed: HashSet<(i32, i32)> = parse_coord_pairs(&opts.subscribed)
+        .into_iter()
+        .collect();
+
+    let mut slots: Vec<ChunkSlot<'_>> = Vec::with_capacity(opts.chunks.len());
+    for chunk in &opts.chunks {
+        slots.push(ChunkSlot {
+            chunk_x: chunk.chunk_x,
+            chunk_y: chunk.chunk_y,
+            mines: chunk.mines.as_ref(),
+            revealed: chunk.revealed.as_ref(),
+            flagged: chunk.flagged.as_ref(),
+            new_indices: Vec::new(),
+        });
     }
-    out
+
+    Ok(flood_fill(
+        cs,
+        opts.max_reveals,
+        opts.reveal_value,
+        opts.hidden_revealed,
+        opts.hidden_flagged,
+        &seeds,
+        &subscribed,
+        &mut slots,
+    ))
+}
+
+/// Multi-seed minesweeper flood fill on flat chunk buffers (read-only).
+/// Returns local cell indices to reveal; does not mutate input buffers.
+#[napi]
+pub fn flood_fill_native(opts: FloodFillOptions) -> Result<FloodFillResult> {
+    Ok(to_napi_result(compute_flood_fill(&opts)?))
+}
+
+pub struct FloodFillTask {
+    opts: FloodFillOptions,
+}
+
+impl Task for FloodFillTask {
+    type Output = FloodFillResult;
+    type JsValue = FloodFillResult;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        Ok(to_napi_result(compute_flood_fill(&self.opts)?))
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+/// Same as flood_fill_native but runs BFS on a libuv thread pool worker (non-blocking).
+#[napi]
+pub fn flood_fill_native_async(opts: FloodFillOptions) -> AsyncTask<FloodFillTask> {
+    AsyncTask::new(FloodFillTask { opts })
 }
 
 /// Generate one chunk (kept for single-chunk use in ChunkManager fallback path).
 #[napi]
 pub fn generate_chunk(chunk_x: i32, chunk_y: i32, chunk_size: u32, seed: String) -> Vec<u8> {
-    let noise = OpenSimplex::new(seed_u32(&seed));
-    generate_chunk_inner(chunk_x, chunk_y, chunk_size as usize, &noise)
+    generate_chunk_inner(chunk_x, chunk_y, chunk_size as usize, &seed)
 }
 
 /// Generate many chunks in parallel using all available CPU cores (Rayon).
@@ -87,13 +179,121 @@ pub fn generate_chunks_batch(
     seed: String,
 ) -> Vec<Vec<u8>> {
     let size = chunk_size as usize;
-    let seed_val = seed_u32(&seed);
     coords
         .par_iter()
-        .map(|pair| {
-            // OpenSimplex is not Send, so construct one per Rayon thread.
-            let noise = OpenSimplex::new(seed_val);
-            generate_chunk_inner(pair[0], pair[1], size, &noise)
-        })
+        .map(|pair| generate_chunk_inner(pair[0], pair[1], size, &seed))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flood_fill::{ChunkReveals, FloodFillOutput, PendingFill};
+
+    fn sample_fill_options(chunk_size: u32) -> FloodFillOptions {
+        let cs = chunk_size as usize;
+        let cells = cs * cs;
+        FloodFillOptions {
+            chunk_size,
+            max_reveals: 100,
+            reveal_value: 0,
+            hidden_revealed: 0xff,
+            hidden_flagged: 0xff,
+            seeds: vec![vec![0, 0]],
+            subscribed: vec![vec![0, 0]],
+            chunks: vec![FloodFillChunkInput {
+                chunk_x: 0,
+                chunk_y: 0,
+                mines: Buffer::from(vec![0u8; cells]),
+                revealed: Buffer::from(vec![0xff; cells]),
+                flagged: Buffer::from(vec![0xff; cells]),
+            }],
+        }
+    }
+
+    #[test]
+    fn parse_coord_pairs_filters_invalid_entries() {
+        let pairs = vec![
+            vec![1, 2],
+            vec![3],
+            vec![4, 5, 6],
+            vec![],
+        ];
+        assert_eq!(parse_coord_pairs(&pairs), vec![(1, 2), (4, 5)]);
+    }
+
+    #[test]
+    fn to_napi_result_maps_all_fields() {
+        let out = FloodFillOutput {
+            revealed_count: 2,
+            capped: true,
+            reveals: vec![ChunkReveals {
+                chunk_x: 1,
+                chunk_y: -1,
+                indices: vec![0, 3],
+            }],
+            pending_fills: vec![PendingFill {
+                chunk_x: 2,
+                chunk_y: 0,
+                local_x: 1,
+                local_y: 1,
+            }],
+            continuation: vec![(5, 6), (7, 8)],
+        };
+
+        let mapped = to_napi_result(out);
+        assert_eq!(mapped.revealed_count, 2);
+        assert!(mapped.capped);
+        assert_eq!(mapped.reveals[0].chunk_x, 1);
+        assert_eq!(mapped.reveals[0].indices, vec![0, 3]);
+        assert_eq!(mapped.pending_fills[0].local_x, 1);
+        assert_eq!(mapped.continuation, vec![vec![5, 6], vec![7, 8]]);
+    }
+
+    #[test]
+    fn compute_flood_fill_rejects_zero_chunk_size() {
+        let mut opts = sample_fill_options(4);
+        opts.chunk_size = 0;
+        let err = compute_flood_fill(&opts).unwrap_err();
+        assert!(err.to_string().contains("chunk_size"));
+    }
+
+    #[test]
+    fn compute_flood_fill_runs_end_to_end() {
+        let opts = sample_fill_options(4);
+        let out = compute_flood_fill(&opts).unwrap();
+        assert_eq!(out.revealed_count, 16);
+    }
+
+    #[test]
+    fn compute_flood_fill_ignores_malformed_seeds() {
+        let mut opts = sample_fill_options(4);
+        opts.seeds = vec![vec![99], vec![1, 1]];
+        let out = compute_flood_fill(&opts).unwrap();
+        assert_eq!(out.revealed_count, 16);
+    }
+
+    #[test]
+    fn generate_chunk_matches_inner_helper() {
+        let inner = generate_chunk_inner(2, -1, 8, "parity");
+        let exported = generate_chunk(2, -1, 8, "parity".to_string());
+        assert_eq!(inner, exported);
+    }
+
+    #[test]
+    fn generate_chunks_batch_preserves_order_and_matches_single() {
+        let coords = vec![vec![0, 0], vec![1, 0], vec![0, 1]];
+        let batch = generate_chunks_batch(coords.clone(), 16, "batch-seed".to_string());
+        assert_eq!(batch.len(), 3);
+        for (pair, chunk) in coords.iter().zip(batch.iter()) {
+            let single = generate_chunk(pair[0], pair[1], 16, "batch-seed".to_string());
+            assert_eq!(*chunk, single);
+        }
+    }
+
+    #[test]
+    fn generate_chunks_batch_empty_input() {
+        let batch = generate_chunks_batch(vec![], 32, "empty".to_string());
+        assert!(batch.is_empty());
+    }
 }

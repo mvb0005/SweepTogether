@@ -111,12 +111,16 @@ const CHUNK_COUNT = parseInt(process.env.PERF_CHUNK_COUNT ?? '400', 10);
 const BATCH_SIZE = parseInt(process.env.PERF_BATCH_SIZE ?? '100', 10);
 const ORIGIN_X = parseInt(process.env.PERF_ORIGIN_X ?? '50000', 10);
 const ORIGIN_Y = parseInt(process.env.PERF_ORIGIN_Y ?? '50000', 10);
-const CONNECT_TIMEOUT_MS = parseInt(process.env.PERF_CONNECT_TIMEOUT_MS ?? '10000', 10);
-const LOAD_TIMEOUT_MS = parseInt(process.env.PERF_LOAD_TIMEOUT_MS ?? '120000', 10);
-const JSON_OUTPUT = process.env.PERF_JSON === '1';
-
 const MODE = process.argv[2] ?? 'sustained';
 const IS_MARATHON = MODE === 'marathon';
+const CONNECT_TIMEOUT_MS = parseInt(process.env.PERF_CONNECT_TIMEOUT_MS ?? '10000', 10);
+const JOIN_TIMEOUT_MS = parseInt(
+  process.env.PERF_JOIN_TIMEOUT_MS ?? (IS_MARATHON ? '120000' : String(CONNECT_TIMEOUT_MS)),
+  10,
+);
+const LOAD_TIMEOUT_MS = parseInt(process.env.PERF_LOAD_TIMEOUT_MS ?? '120000', 10);
+const CLIENT_STAGGER_MS = parseInt(process.env.PERF_CLIENT_STAGGER_MS ?? (IS_MARATHON ? '2000' : '0'), 10);
+const JSON_OUTPUT = process.env.PERF_JSON === '1';
 
 const DURATION_SEC = parseFloat(process.env.PERF_DURATION_SEC ?? (IS_MARATHON ? '600' : '30'));
 const STEP_MS = parseInt(process.env.PERF_STEP_MS ?? '150', 10);
@@ -345,7 +349,12 @@ function connect(): Promise<ReturnType<typeof io>> {
 
 function joinGame(socket: ReturnType<typeof io>, gameId: string, username: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('joinGame timed out')), CONNECT_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      reject(new Error(
+        `joinGame timed out after ${JOIN_TIMEOUT_MS}ms (game="${gameId}"). ` +
+        'The backend event loop may be blocked — restart with: docker compose restart backend',
+      ));
+    }, JOIN_TIMEOUT_MS);
 
     socket.once('gameJoined', () => {
       clearTimeout(timer);
@@ -359,6 +368,16 @@ function joinGame(socket: ReturnType<typeof io>, gameId: string, username: strin
 
     socket.emit('joinGame', { gameId, username });
   });
+}
+
+/** Create the game once before parallel marathon clients connect. */
+async function warmupGame(gameId: string): Promise<void> {
+  const socket = await connect();
+  try {
+    await joinGame(socket, gameId, 'perf-warmup');
+  } finally {
+    socket.close();
+  }
 }
 
 class RevealTracker {
@@ -785,10 +804,19 @@ async function runMultiClientMarathon(): Promise<SustainedResult> {
   }
   console.log('');
 
+  console.log(`Warming up game "${gameId}" (join timeout ${JOIN_TIMEOUT_MS}ms)...`);
+  await warmupGame(gameId);
+  console.log('Game ready.\n');
+
   const t0 = Date.now();
   const results = await Promise.all(
     Array.from({ length: CLIENTS }, (_, i) =>
-      runSingleClientPan(i, gameId, configs[i], DURATION_SEC),
+      (async () => {
+        if (CLIENT_STAGGER_MS > 0 && i > 0) {
+          await sleep(CLIENT_STAGGER_MS * i);
+        }
+        return runSingleClientPan(i, gameId, configs[i], DURATION_SEC);
+      })(),
     ),
   );
   const wallSec = (Date.now() - t0) / 1000;

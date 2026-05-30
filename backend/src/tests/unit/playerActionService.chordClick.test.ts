@@ -34,16 +34,44 @@ import { ScoreService } from '../../application/scoreService';
 import { EventBus } from '../../infrastructure/eventBus/EventBus';
 import { SocketEventMap } from '../../infrastructure/network/socketEvents';
 import { Cell, GameState, PlayerStatus, Player } from '../../domain/types';
-import * as gridLogic from '../../domain/gridLogic';
+import { CHUNK_SIZE } from '../../types/chunkTypes';
 
-// Mock dependencies
-jest.mock('../../domain/gridLogic');
-const mockedGridLogic = gridLogic as jest.Mocked<typeof gridLogic>;
+function globalToLocal(gx: number, gy: number) {
+  return {
+    chunkCoordinate: { x: Math.floor(gx / CHUNK_SIZE), y: Math.floor(gy / CHUNK_SIZE) },
+    localCoordinate: {
+      x: ((gx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE,
+      y: ((gy % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE,
+    },
+  };
+}
+
+function tileMapFromCells(cells: Cell[]): Map<string, Cell> {
+  const map = new Map<string, Cell>();
+  for (const cell of cells) map.set(`${cell.x},${cell.y}`, cell);
+  return map;
+}
+
+function createMockChunkManager(cells: Cell[]) {
+  const tiles = tileMapFromCells(cells);
+  return {
+    convertGlobalToChunkLocalCoordinates: jest.fn(globalToLocal),
+    getChunk: jest.fn().mockImplementation(async (_cx: number, _cy: number) => ({
+      getTile: (lx: number, ly: number) => tiles.get(`${lx},${ly}`),
+      setTile: jest.fn((lx: number, ly: number, cell: Cell) => {
+        tiles.set(`${lx},${ly}`, cell);
+      }),
+    })),
+  };
+}
 
 describe('PlayerActionService - Chord Click', () => {
   // Mock objects
   let mockEventBus: jest.Mocked<EventBus<SocketEventMap>>;
-  let mockGameStateService: jest.Mocked<Partial<GameStateService>>;
+  let mockGameStateService: jest.Mocked<Partial<GameStateService>> & {
+    runGlobalFloodFill: jest.Mock;
+    getChunkManager: jest.Mock;
+  };
   let mockGameUpdateService: jest.Mocked<Partial<GameUpdateService>>;
     let mockScoreService: jest.Mocked<Partial<ScoreService>>;
   let playerActionService: PlayerActionService;
@@ -95,7 +123,9 @@ describe('PlayerActionService - Chord Click', () => {
       getGame: jest.fn().mockReturnValue(mockGame),
       getCell: jest.fn(),
       updateGridCell: jest.fn(),
-      updateGridCells: jest.fn()
+      updateGridCells: jest.fn(),
+      runGlobalFloodFill: jest.fn().mockResolvedValue({ revealedCells: [], pendingFills: new Set() }),
+      getChunkManager: jest.fn(),
     };
     
     mockGameUpdateService = {
@@ -145,56 +175,43 @@ describe('PlayerActionService - Chord Click', () => {
     });
     
     it('should successfully reveal multiple cells with chord click', async () => {
-      // Arrange
       const x = 5, y = 5;
       const revealedCells: Cell[] = [
         { x: 4, y: 4, isMine: false, adjacentMines: 1, revealed: true, flagged: false },
         { x: 6, y: 6, isMine: false, adjacentMines: 2, revealed: true, flagged: false },
-        { x: 4, y: 6, isMine: false, adjacentMines: 0, revealed: true, flagged: false }
+        { x: 4, y: 6, isMine: false, adjacentMines: 0, revealed: true, flagged: false },
       ];
-      
-      // Mock gridLogic.chordClick to return multiple revealed cells
-      mockedGridLogic.chordClick.mockResolvedValue(revealedCells);
-      
-      // Act
+
+      mockGameStateService.getChunkManager.mockReturnValue(createMockChunkManager([
+        { x: 5, y: 5, isMine: false, adjacentMines: 1, revealed: true, flagged: false },
+        { x: 4, y: 4, isMine: false, adjacentMines: 0, revealed: false, flagged: true },
+        { x: 4, y: 6, isMine: false, adjacentMines: 0, revealed: false, flagged: false },
+      ]) as any);
+      mockGameStateService.runGlobalFloodFill.mockResolvedValue({
+        revealedCells,
+        pendingFills: new Set(),
+      });
+
       await handleChordClick({ gameId, socketId, x, y });
-      
-      // Assert
-      // Check if chordClick was called with the right parameters
-      expect(mockedGridLogic.chordClick).toHaveBeenCalledWith(
-        mockGame,
-        x,
-        y,
-        mockGameStateService.getCell
-      );
-      
-      // Check if game state was updated
-      expect(mockGameStateService.updateGridCells).toHaveBeenCalledWith(
-        gameId,
-        revealedCells
-      );
-      
-        // Check if score service was called
-        expect(mockScoreService.handleCellReveal).toHaveBeenCalledWith(
+
+      expect(mockGameStateService.runGlobalFloodFill).toHaveBeenCalledWith(gameId, 4, 6, socketId);
+      expect(mockScoreService.handleCellReveal).toHaveBeenCalledWith(
         gameId,
         socketId,
-          revealedCells,
-        'Chord Click Reveal'
+        revealedCells,
+        'Chord Click Reveal',
       );
-      
-      // Check if updates for all tiles were sent
       expect(mockGameUpdateService.sendTilesUpdate).toHaveBeenCalledWith(
         gameId,
         [
           expect.objectContaining({ x: 4, y: 4, revealed: true, adjacentMines: 1 }),
           expect.objectContaining({ x: 6, y: 6, revealed: true, adjacentMines: 2 }),
-          expect.objectContaining({ x: 4, y: 6, revealed: true, adjacentMines: 0 })
-        ]
+          expect.objectContaining({ x: 4, y: 6, revealed: true, adjacentMines: 0 }),
+        ],
       );
     });
-    
+
     it('should handle revealing a mine with chord click', async () => {
-      // Arrange
       const x = 5, y = 5;
       const hitMineCell: Cell = {
         x: 6,
@@ -202,68 +219,57 @@ describe('PlayerActionService - Chord Click', () => {
         isMine: true,
         adjacentMines: 0,
         revealed: true,
-        flagged: false
+        flagged: false,
       };
-      
-      // Mock chordClick to return a MineHitResult
-      mockedGridLogic.chordClick.mockResolvedValue({ hitMine: hitMineCell });
-      
-      // Act
+
+      mockGameStateService.getChunkManager.mockReturnValue(createMockChunkManager([
+        { x: 5, y: 5, isMine: false, adjacentMines: 1, revealed: true, flagged: false },
+        { x: 4, y: 4, isMine: false, adjacentMines: 0, revealed: false, flagged: true },
+        { x: 6, y: 6, isMine: true, adjacentMines: 0, revealed: false, flagged: false },
+      ]) as any);
+
       await handleChordClick({ gameId, socketId, x, y });
-      
-      // Assert
-      // Check if chordClick was called
-      expect(mockedGridLogic.chordClick).toHaveBeenCalled();
-      
-      // Check if player status was updated to locked out
+
+      expect(mockGameStateService.runGlobalFloodFill).not.toHaveBeenCalled();
       expect(mockGameUpdateService.sendPlayerStatusUpdate).toHaveBeenCalledWith(
         gameId,
         socketId,
         PlayerStatus.LOCKED_OUT,
-        expect.any(Number) // lockoutUntil timestamp
+        expect.any(Number),
       );
-      
-        // Check if score service was called
-        expect(mockScoreService.handleMineHit).toHaveBeenCalledWith(
+      expect(mockScoreService.handleMineHit).toHaveBeenCalledWith(
         gameId,
-          socketId,
-        'Hit Mine (Chord Click)'
+        socketId,
+        'Hit Mine (Chord Click)',
       );
-      
-      // Check if mine cell was updated
       expect(mockGameStateService.updateGridCell).toHaveBeenCalledWith(
         gameId,
-        hitMineCell
+        hitMineCell,
       );
-      
-      // Check if tile update was sent with mine data
       expect(mockGameUpdateService.sendTileUpdate).toHaveBeenCalledWith(
         gameId,
         expect.objectContaining({
           x: 6,
           y: 6,
           revealed: true,
-          isMine: true
-        })
+          isMine: true,
+        }),
       );
     });
-    
+
     it('should do nothing when chord click does not reveal any cells', async () => {
-      // Arrange
       const x = 5, y = 5;
-      
-      // Mock chordClick to return an empty array (nothing to reveal)
-      mockedGridLogic.chordClick.mockResolvedValue([]);
-      
-      // Act
+
+      mockGameStateService.getChunkManager.mockReturnValue(createMockChunkManager([
+        { x: 5, y: 5, isMine: false, adjacentMines: 2, revealed: true, flagged: false },
+        { x: 4, y: 4, isMine: false, adjacentMines: 0, revealed: false, flagged: true },
+        { x: 4, y: 6, isMine: false, adjacentMines: 0, revealed: false, flagged: false },
+      ]) as any);
+
       await handleChordClick({ gameId, socketId, x, y });
-      
-      // Assert
-      expect(mockedGridLogic.chordClick).toHaveBeenCalled();
-      
-      // None of the update methods should be called
-      expect(mockGameStateService.updateGridCells).not.toHaveBeenCalled();
-        expect(mockScoreService.handleCellReveal).not.toHaveBeenCalled();
+
+      expect(mockGameStateService.runGlobalFloodFill).not.toHaveBeenCalled();
+      expect(mockScoreService.handleCellReveal).not.toHaveBeenCalled();
       expect(mockGameUpdateService.sendTilesUpdate).not.toHaveBeenCalled();
     });
     
@@ -279,42 +285,42 @@ describe('PlayerActionService - Chord Click', () => {
       await handleChordClick({ gameId, socketId, x, y });
       
       // Assert
-      // Should not call chordClick
-      expect(mockedGridLogic.chordClick).not.toHaveBeenCalled();
+      // Should not run flood fill
+      expect(mockGameStateService.runGlobalFloodFill).not.toHaveBeenCalled();
     });
-    
+
     it('should unlock player if lockout period has expired', async () => {
-      // Arrange
       const x = 5, y = 5;
       const revealedCell: Cell = {
-        x: 6,
+        x: 4,
         y: 6,
         isMine: false,
-        adjacentMines: 2,
+        adjacentMines: 0,
         revealed: true,
-        flagged: false
+        flagged: false,
       };
-      
-      // Set player status to locked out but with expired lock time
+
       mockGame.players[socketId].status = PlayerStatus.LOCKED_OUT;
-      mockGame.players[socketId].lockedUntil = Date.now() - 1000; // Lock expired 1 second ago
-      
-      // Mock chordClick to return a non-mine cell
-      mockedGridLogic.chordClick.mockResolvedValue([revealedCell]);
-      
-      // Act
+      mockGame.players[socketId].lockedUntil = Date.now() - 1000;
+
+      mockGameStateService.getChunkManager.mockReturnValue(createMockChunkManager([
+        { x: 5, y: 5, isMine: false, adjacentMines: 1, revealed: true, flagged: false },
+        { x: 4, y: 4, isMine: false, adjacentMines: 0, revealed: false, flagged: true },
+        { x: 4, y: 6, isMine: false, adjacentMines: 0, revealed: false, flagged: false },
+      ]) as any);
+      mockGameStateService.runGlobalFloodFill.mockResolvedValue({
+        revealedCells: [revealedCell],
+        pendingFills: new Set(),
+      });
+
       await handleChordClick({ gameId, socketId, x, y });
-      
-      // Assert
-      // Player status should be updated to ACTIVE
+
       expect(mockGameUpdateService.sendPlayerStatusUpdate).toHaveBeenCalledWith(
         gameId,
         socketId,
-        PlayerStatus.ACTIVE
+        PlayerStatus.ACTIVE,
       );
-      
-      // chordClick should be called after player is unlocked
-      expect(mockedGridLogic.chordClick).toHaveBeenCalled();
+      expect(mockGameStateService.runGlobalFloodFill).toHaveBeenCalled();
     });
     
     it('should handle gracefully when game is not found', async () => {
@@ -334,38 +340,31 @@ describe('PlayerActionService - Chord Click', () => {
         'Game not found.'
       );
       
-      // Should not call chordClick
-      expect(mockedGridLogic.chordClick).not.toHaveBeenCalled();
+      // Should not run flood fill
+      expect(mockGameStateService.runGlobalFloodFill).not.toHaveBeenCalled();
     });
-    
+
     it('should handle gracefully when player is not found in game', async () => {
-      // Arrange
       const x = 5, y = 5;
       const nonExistentSocketId = 'non-existent-socket-id';
-      
-      // Act
+
       await handleChordClick({ gameId, socketId: nonExistentSocketId, x, y });
-      
-      // Assert
-      // Should not call chordClick
-      expect(mockedGridLogic.chordClick).not.toHaveBeenCalled();
+
+      expect(mockGameStateService.runGlobalFloodFill).not.toHaveBeenCalled();
     });
-    
-    it('should handle error during chordClick call', async () => {
-      // Arrange
+
+    it('should handle error during chord click', async () => {
       const x = 5, y = 5;
-      
-      // Mock chordClick to throw an error
-      mockedGridLogic.chordClick.mockRejectedValue(new Error('Test error'));
-      
-      // Act
+
+      mockGameStateService.getChunkManager.mockImplementation(() => {
+        throw new Error('Test error');
+      });
+
       await handleChordClick({ gameId, socketId, x, y });
-      
-      // Assert
-      // Should send error
+
       expect(mockGameUpdateService.sendError).toHaveBeenCalledWith(
         socketId,
-        'Failed to perform chord click'
+        'Failed to perform chord click',
       );
     });
   });

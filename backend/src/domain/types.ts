@@ -98,6 +98,33 @@ export interface Player {
   status: PlayerStatus;
   lockedUntil?: number; // Timestamp when lockout ends
   viewport?: ViewportState; // For infinite worlds
+  x: number;
+  y: number;
+  color: string;
+  avatarUrl?: string;
+  discordUserId?: string;
+  lastMoveAt?: number;
+}
+
+export interface MovePlayerPayload {
+  dx: -1 | 0 | 1;
+  dy: -1 | 0 | 1;
+}
+
+export interface PlayerMovedPayload {
+  playerId: string;
+  x: number;
+  y: number;
+}
+
+export interface PlayerPositionSnapshot {
+  playerId: string;
+  username: string;
+  x: number;
+  y: number;
+  color: string;
+  avatarUrl?: string;
+  discordUserId?: string;
 }
 
 export type Players = Record<string, Player>;

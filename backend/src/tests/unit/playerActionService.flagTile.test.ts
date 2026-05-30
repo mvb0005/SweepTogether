@@ -36,6 +36,14 @@ import * as gridLogic from '../../domain/gridLogic';
 jest.mock('../../domain/gridLogic');
 const mockedGridLogic = gridLogic as jest.Mocked<typeof gridLogic>;
 
+jest.mock('../../infrastructure/persistence/db', () => ({
+    getChunkRepository: () => ({
+        ensure: jest.fn().mockResolvedValue(undefined),
+        getOrAddPlayerIndex: jest.fn().mockResolvedValue(0),
+        setFlagged: jest.fn().mockResolvedValue(undefined),
+    }),
+}));
+
 describe('PlayerActionService - Flag Tile', () => {
   // Mock objects
   let mockEventBus: jest.Mocked<EventBus<SocketEventMap>>;
@@ -91,7 +99,10 @@ describe('PlayerActionService - Flag Tile', () => {
       getGame: jest.fn().mockReturnValue(mockGame),
       getCell: jest.fn(),
       updateGridCell: jest.fn(),
-      updateGridCells: jest.fn()
+      updateGridCells: jest.fn(),
+      getChunkManager: jest.fn().mockReturnValue({
+        getChunkById: jest.fn().mockReturnValue(undefined),
+      }),
     };
     
     mockGameUpdateService = {
