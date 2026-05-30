@@ -14,6 +14,7 @@ import { TelemetryBatchPayload } from '../../types/telemetryTypes';
 import { getPendingFillsRepository } from '../persistence/db';
 
 const CHUNK_SUB_DEBOUNCE_MS = 50;
+const MAX_TELEMETRY_EVENTS_PER_BATCH = 256;
 
 interface PendingChunkSubs {
   gameId: string;
@@ -289,16 +290,15 @@ export function registerSocketHandlers(
   });
 
   socket.on('telemetryEvents', (data: TelemetryBatchPayload) => {
-    if (!data?.events?.length) return;
-    telemetryService.ingest(data.events);
-    telemetryService.logBatch(data.sessionId, data.variant, data.events.length);
-    for (const event of data.events) {
-      if (event.durationMs === undefined) continue;
-      const attrs = event.attrs
-        ? ' ' + Object.entries(event.attrs).map(([k, v]) => `${k}=${v}`).join(' ')
-        : '';
-      console.log(`[telemetry] variant=${event.variant} ${event.name}=${event.durationMs.toFixed(1)}ms${attrs}`);
-    }
+    // Unauthenticated client input: validate shape and cap batch size so a
+    // malicious client can't flood logs/memory. Per-event console.log removed
+    // (log-flood vector); telemetryService keeps its own bounded buffer.
+    if (!data || !Array.isArray(data.events) || data.events.length === 0) return;
+    const events = data.events.slice(0, MAX_TELEMETRY_EVENTS_PER_BATCH);
+    const sessionId = typeof data.sessionId === 'string' ? data.sessionId.slice(0, 64) : 'unknown';
+    const variant = typeof data.variant === 'string' ? data.variant.slice(0, 64) : 'unknown';
+    telemetryService.ingest(events);
+    telemetryService.logBatch(sessionId, variant, events.length);
   });
 
   socket.on('unsubscribeFromChunk', (data: { gameId: string; chunkX: number; chunkY: number }) => {
