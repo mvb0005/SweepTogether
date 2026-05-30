@@ -119,10 +119,10 @@ const MAX_PENDING_FILL_SEEDS_PER_CHUNK = 32;
 const WORLD_PLAYER_ID = '__world__';
 const BFS_YIELD_EVERY_STEPS = 2000;
 
-function packCoord(x: number, y: number): bigint {
-    const shift = BigInt(32);
-    const mask = (BigInt(1) << shift) - BigInt(1);
-    return (BigInt(x) << shift) | (BigInt(y) & mask);
+// Visited-key for the JS BFS fallback. A string key avoids per-cell BigInt
+// allocation/ops (slow) in the hot loop; the native addon is the fast path.
+function packCoord(x: number, y: number): string {
+    return x + ',' + y;
 }
 
 export class GameStateService {
@@ -1082,7 +1082,7 @@ export class GameStateService {
         const chunks = cm.chunks;
         const revealedByChunk = new Map<string, { localX: number; localY: number }[]>();
         let revealedCount = 0;
-        const visited = new Set<bigint>();
+        const visited = new Set<string>();
         const pendingFills = new Set<string>();
         const updatedChunkIds = new Set<string>();
         const t0 = performance.now();
