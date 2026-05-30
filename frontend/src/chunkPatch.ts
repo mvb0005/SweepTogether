@@ -32,7 +32,10 @@ export function patchReveal(chunks: ChunkMap, x: number, y: number): ChunkMap {
     [key]: {
       ...chunk,
       revealed: [...chunk.revealed, idx],
-      adjMines: [...chunk.adjMines, 0],
+      // -1 = unconfirmed: optimistic reveal doesn't know the true adjacency yet.
+      // The renderer only draws counts for adj > 0, so this shows blank until the
+      // authoritative server chunkData overwrites it (avoids asserting a wrong 0).
+      adjMines: [...chunk.adjMines, -1],
       flagged: chunk.flagged.filter(i => i !== idx),
     },
   };
