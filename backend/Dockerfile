@@ -18,7 +18,7 @@ ARG NODE_ENV=development
 ENV NODE_ENV=${NODE_ENV}
 
 COPY package*.json ./
-RUN npm install
+RUN npm install --include=dev
 
 COPY . .
 
