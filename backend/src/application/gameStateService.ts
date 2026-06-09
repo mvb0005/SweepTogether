@@ -20,6 +20,7 @@ import { WorldGenerator } from '../domain/worldGenerator';
 import { ChunkManager } from '../domain/ChunkManager';
 import { IChunkManager, CHUNK_SIZE, ChunkPersistenceLoader } from '../types/chunkTypes';
 import { GetCellFunction } from '../domain/game';
+import { WORLD_GEN_VERSION } from '../domain/worldVersion';
 import { Server as SocketIOServer } from 'socket.io';
 import { IChunk } from '../types/chunkTypes';
 import { getGameRepository, getChunkRepository, getPendingFillsRepository } from '../infrastructure/persistence/db';
@@ -318,9 +319,22 @@ export class GameStateService {
             return;
         }
 
-        // Load or generate a persistent seed for this game
-        const seedStr = await getGameRepository().createOrLoad(gameId, config);
+        // Load or generate a persistent seed for this game, and check world schema version.
+        const { seed: seedStr, worldGenVersion } = await getGameRepository().createOrLoad(gameId, config);
         this.gameSeeds.set(gameId, seedStr);
+
+        if (worldGenVersion !== WORLD_GEN_VERSION) {
+            const [droppedChunks, droppedFills] = await Promise.all([
+                getChunkRepository().dropAllForGame(gameId),
+                getPendingFillsRepository().dropAllForGame(gameId),
+            ]);
+            await getGameRepository().setWorldGenVersion(gameId, WORLD_GEN_VERSION);
+            console.warn(
+                `[createGame] World schema changed v${worldGenVersion} → v${WORLD_GEN_VERSION} ` +
+                `for game "${gameId}": reset ${droppedChunks} chunk(s) and ${droppedFills} pending fill(s). ` +
+                `Starting fresh world. See src/domain/worldVersion.ts for upgrade instructions.`,
+            );
+        }
         const newGame: GameState = {
             gameId,
             boardConfig: config,

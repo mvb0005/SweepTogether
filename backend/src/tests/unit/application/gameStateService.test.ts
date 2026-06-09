@@ -8,18 +8,23 @@ jest.mock('../../../domain/worldGenerator');
 
 // Mock persistence layer so unit tests don't need a real database
 jest.mock('../../../infrastructure/persistence/db', () => ({
-    getGameRepository: () => ({ createOrLoad: jest.fn().mockResolvedValue(12345) }),
+    getGameRepository: () => ({
+        createOrLoad: jest.fn().mockResolvedValue({ seed: '12345', worldGenVersion: 2 }),
+        setWorldGenVersion: jest.fn().mockResolvedValue(undefined),
+    }),
     getChunkRepository: () => ({
         ensure: jest.fn().mockResolvedValue(undefined),
         getOrAddPlayerIndex: jest.fn().mockResolvedValue(0),
         revealCells: jest.fn().mockResolvedValue(undefined),
         setFlagged: jest.fn().mockResolvedValue(undefined),
         load: jest.fn().mockResolvedValue(null),
+        dropAllForGame: jest.fn().mockResolvedValue(0),
     }),
     getPendingFillsRepository: () => ({
         loadAll: jest.fn().mockResolvedValue(new Map()),
         save: jest.fn().mockResolvedValue(undefined),
         delete: jest.fn().mockResolvedValue(undefined),
+        dropAllForGame: jest.fn().mockResolvedValue(0),
     }),
 }));
 

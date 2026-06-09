@@ -36,6 +36,12 @@ export class PendingFillsRepository {
     await this.collection.deleteOne({ _id: this.id(gameId, chunkId) });
   }
 
+  /** Deletes every pending-fill document for a game. Used when world schema version changes. */
+  async dropAllForGame(gameId: string): Promise<number> {
+    const result = await this.collection.deleteMany({ gameId });
+    return result.deletedCount;
+  }
+
   async loadAll(gameId: string): Promise<Map<string, PendingFillEntry[]>> {
     const docs = await this.collection.find({ gameId }).toArray();
     const result = new Map<string, PendingFillEntry[]>();
