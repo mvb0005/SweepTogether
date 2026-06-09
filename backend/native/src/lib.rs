@@ -6,7 +6,6 @@ use flood_fill::{flood_fill, ChunkSlot, FloodFillOutput};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use rayon::prelude::*;
-use std::collections::HashSet;
 
 #[napi(object)]
 pub struct FloodFillChunkInput {
@@ -25,7 +24,6 @@ pub struct FloodFillOptions {
     pub hidden_revealed: u8,
     pub hidden_flagged: u8,
     pub seeds: Vec<Vec<i32>>,
-    pub subscribed: Vec<Vec<i32>>,
     pub chunks: Vec<FloodFillChunkInput>,
 }
 
@@ -104,9 +102,6 @@ pub fn compute_flood_fill(opts: &FloodFillOptions) -> Result<FloodFillOutput> {
     }
 
     let seeds = parse_coord_pairs(&opts.seeds);
-    let subscribed: HashSet<(i32, i32)> = parse_coord_pairs(&opts.subscribed)
-        .into_iter()
-        .collect();
 
     let mut slots: Vec<ChunkSlot<'_>> = Vec::with_capacity(opts.chunks.len());
     for chunk in &opts.chunks {
@@ -127,7 +122,6 @@ pub fn compute_flood_fill(opts: &FloodFillOptions) -> Result<FloodFillOutput> {
         opts.hidden_revealed,
         opts.hidden_flagged,
         &seeds,
-        &subscribed,
         &mut slots,
     ))
 }
@@ -181,6 +175,7 @@ pub fn generate_chunks_batch(
     let size = chunk_size as usize;
     coords
         .par_iter()
+        .filter(|pair| pair.len() >= 2)
         .map(|pair| generate_chunk_inner(pair[0], pair[1], size, &seed))
         .collect()
 }
@@ -200,7 +195,6 @@ mod tests {
             hidden_revealed: 0xff,
             hidden_flagged: 0xff,
             seeds: vec![vec![0, 0]],
-            subscribed: vec![vec![0, 0]],
             chunks: vec![FloodFillChunkInput {
                 chunk_x: 0,
                 chunk_y: 0,
@@ -295,5 +289,17 @@ mod tests {
     fn generate_chunks_batch_empty_input() {
         let batch = generate_chunks_batch(vec![], 32, "empty".to_string());
         assert!(batch.is_empty());
+    }
+
+    #[test]
+    fn generate_chunks_batch_skips_malformed_coords() {
+        // A pair with fewer than 2 elements must be silently skipped.
+        let coords = vec![vec![0, 0], vec![99], vec![1, 0]];
+        let batch = generate_chunks_batch(coords.clone(), 8, "guard".to_string());
+        assert_eq!(batch.len(), 2, "malformed pair should be excluded");
+        let c00 = generate_chunk(0, 0, 8, "guard".to_string());
+        let c10 = generate_chunk(1, 0, 8, "guard".to_string());
+        assert_eq!(batch[0], c00);
+        assert_eq!(batch[1], c10);
     }
 }

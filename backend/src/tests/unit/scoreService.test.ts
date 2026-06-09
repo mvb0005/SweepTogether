@@ -45,7 +45,10 @@ describe('ScoreService', () => {
     id: playerId,
     username: 'Test Player',
     score: 0,
-    status: PlayerStatus.ACTIVE
+    status: PlayerStatus.ACTIVE,
+    x: 0,
+    y: 0,
+    color: '#000000'
   };
 
   beforeEach(() => {

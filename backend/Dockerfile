@@ -18,7 +18,7 @@ ARG NODE_ENV=development
 ENV NODE_ENV=${NODE_ENV}
 
 COPY package*.json ./
-RUN npm install
+RUN npm install --include=dev
 
 COPY . .
 
@@ -31,4 +31,6 @@ RUN if [ "$NODE_ENV" = "production" ]; then \
 
 EXPOSE 3000
 
-CMD ["npm", "run", "dev"]
+# Production default: run the compiled output. Dev compose overrides this with
+# `npm run dev` (nodemon) and builds with NODE_ENV=development so dev deps remain.
+CMD ["npm", "start"]

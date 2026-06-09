@@ -2,6 +2,7 @@ import {
   Cell, GameConfig, MineReveal, Player, PlayerStatus,
   Coordinates, ScoreUpdatePayload, PlayerStatusUpdatePayload, GameState
 } from './types';
+import { DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y, playerColorFromId } from './playerMovement';
 
 // --- Type Definition for Cell Retrieval ---
 
@@ -43,8 +44,11 @@ export function addPlayerToGame(gameState: GameState, playerId: string, username
     username: username,
     score: 0,
     status: PlayerStatus.ACTIVE,
-    viewport: gameState.boardConfig.isInfiniteWorld ? 
-      { center: { x: 0, y: 0 }, width: 20, height: 15, zoom: 1 } : 
+    x: DEFAULT_SPAWN_X,
+    y: DEFAULT_SPAWN_Y,
+    color: playerColorFromId(playerId),
+    viewport: gameState.boardConfig.isInfiniteWorld ?
+      { center: { x: 0, y: 0 }, width: 20, height: 15, zoom: 1 } :
       undefined,
   };
   

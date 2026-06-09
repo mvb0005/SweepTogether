@@ -15,10 +15,12 @@ pub fn seed_u32(s: &str) -> u32 {
 
 pub fn cell_roll(seed: &str, x: i32, y: i32) -> f64 {
     let mut h = seed_u32(seed);
-    h ^= x as u32;
+    // Pack x and y together before hashing to avoid axis correlation from
+    // sequential XOR-fold (where cell_roll(s,x,y) ≈ cell_roll(s,y,x) for some inputs).
+    let combined = (x as u32).wrapping_mul(0x9e3779b9).wrapping_add(y as u32);
+    h ^= combined;
     h = h.wrapping_mul(0x85eb_ca6b);
     h ^= h >> 16;
-    h ^= y as u32;
     h = h.wrapping_mul(0xc2b2_ae35);
     h ^= h >> 16;
     (h as f64) / (u32::MAX as f64)
@@ -29,36 +31,39 @@ fn is_mine(seed: &str, gx: i32, gy: i32) -> bool {
 }
 
 pub fn generate_chunk_inner(chunk_x: i32, chunk_y: i32, size: usize, seed: &str) -> Vec<u8> {
-    let mut mines = vec![false; size * size];
-    for ly in 0..size {
-        for lx in 0..size {
-            let gx = chunk_x * size as i32 + lx as i32;
-            let gy = chunk_y * size as i32 + ly as i32;
-            mines[ly * size + lx] = is_mine(seed, gx, gy);
+    // Build a (size+2)² bordered mine grid: one cell of overlap on each side so
+    // adjacency counts for every cell — including chunk-edge cells — can be read
+    // from the array instead of re-hashing 8 neighbours per cell (~8× fewer calls).
+    let b = size + 2;
+    let mut bmines = vec![false; b * b];
+    for by in 0..b {
+        for bx in 0..b {
+            let gx = chunk_x * size as i32 + bx as i32 - 1;
+            let gy = chunk_y * size as i32 + by as i32 - 1;
+            bmines[by * b + bx] = is_mine(seed, gx, gy);
         }
     }
 
     let mut out = vec![0u8; size * size];
     for ly in 0..size {
         for lx in 0..size {
-            let idx = ly * size + lx;
-            if mines[idx] {
-                out[idx] = MINE_CELL;
+            let bx = lx + 1;
+            let by = ly + 1;
+            if bmines[by * b + bx] {
+                out[ly * size + lx] = MINE_CELL;
             } else {
                 let mut adj = 0u8;
-                for dy in -1i32..=1 {
-                    for dx in -1i32..=1 {
-                        if dx == 0 && dy == 0 {
+                for dy in 0..3usize {
+                    for dx in 0..3usize {
+                        if dx == 1 && dy == 1 {
                             continue;
                         }
-                        let gx = chunk_x * size as i32 + lx as i32 + dx;
-                        let gy = chunk_y * size as i32 + ly as i32 + dy;
-                        if is_mine(seed, gx, gy) {
+                        if bmines[(by + dy - 1) * b + (bx + dx - 1)] {
                             adj += 1;
                         }
                     }
                 }
-                out[idx] = adj;
+                out[ly * size + lx] = adj;
             }
         }
     }
@@ -150,9 +155,13 @@ mod tests {
     }
 
     #[test]
-    fn adjacent_counts_match_local_mine_neighborhood() {
+    fn adjacent_counts_match_global_mine_neighborhood() {
+        // Use global coordinates for all 8 neighbours so edge cells are also
+        // verified against out-of-chunk mines (previous version only checked
+        // within-chunk neighbours, which silently skipped border cells).
         let size = 8;
-        let out = gen(0, 0, size, "adjacency-check");
+        let seed = "adjacency-check";
+        let out = gen(0, 0, size, seed);
         for ly in 0..size {
             for lx in 0..size {
                 let idx = ly * size + lx;
@@ -162,19 +171,15 @@ mod tests {
                 let mut expected = 0u8;
                 for dy in -1i32..=1 {
                     for dx in -1i32..=1 {
-                        if dx == 0 && dy == 0 {
+                        if dx == 0 && dy == 0{
                             continue;
                         }
-                        let gx = lx as i32 + dx;
-                        let gy = ly as i32 + dy;
-                        if gx >= 0 && gx < size as i32 && gy >= 0 && gy < size as i32 {
-                            if out[(gy as usize) * size + (gx as usize)] == MINE_CELL {
-                                expected += 1;
-                            }
+                        if is_mine(seed, lx as i32 + dx, ly as i32 + dy) {
+                            expected += 1;
                         }
                     }
                 }
-                assert_eq!(out[idx], expected, "local mismatch at ({lx},{ly})");
+                assert_eq!(out[idx], expected, "adjacency mismatch at ({lx},{ly})");
             }
         }
     }

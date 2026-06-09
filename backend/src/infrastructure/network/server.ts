@@ -1,22 +1,22 @@
-import express, { Request, Response, NextFunction, ErrorRequestHandler } from 'express';
+import express, { ErrorRequestHandler } from 'express';
 import http from 'http';
 import { Server } from "socket.io";
-import path from 'path';
 
 // Import the refactored socket handler registration function
 import { registerSocketHandlers } from './socketHandlers';
 import { createDiscordRoutes } from './discordRoutes';
 
 // Import DB functions and repository implementation
-import { connectToDatabase, disconnectFromDatabase, MongoGameRepository } from '../persistence/db'; 
+import { connectToDatabase, disconnectFromDatabase } from '../persistence/db'; 
 
 // Import the bootstrap function
 import { initAppServices } from '../../application/services';
 
 const app = express();
 
-// Middleware to parse JSON bodies
-app.use(express.json());
+// Middleware to parse JSON bodies. Small cap — the only HTTP route is the
+// Discord token exchange, which carries a short OAuth code.
+app.use(express.json({ limit: '16kb' }));
 app.use('/api', createDiscordRoutes());
 
 const corsOrigins = (process.env.SOCKET_CORS_ORIGINS ?? 'http://localhost:8080,http://localhost:3000')
@@ -27,7 +27,7 @@ const corsOrigins = (process.env.SOCKET_CORS_ORIGINS ?? 'http://localhost:8080,h
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
+        origin: corsOrigins,
         methods: ["GET", "POST"],
     },
 });

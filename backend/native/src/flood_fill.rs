@@ -106,7 +106,6 @@ pub fn flood_fill(
     hidden_revealed: u8,
     hidden_flagged: u8,
     seeds: &[(i32, i32)],
-    _subscribed: &HashSet<(i32, i32)>,
     chunks: &mut [ChunkSlot<'_>],
 ) -> FloodFillOutput {
     let cells = (chunk_size * chunk_size) as usize;
@@ -257,7 +256,6 @@ mod tests {
         chunks: &mut [TestChunk],
         coords: &[(i32, i32)],
     ) -> FloodFillOutput {
-        let subscribed: HashSet<(i32, i32)> = coords.iter().copied().collect();
         let mut slots: Vec<ChunkSlot<'_>> = chunks
             .iter()
             .zip(coords.iter())
@@ -277,7 +275,6 @@ mod tests {
             HIDDEN_CELL,
             HIDDEN_CELL,
             seeds,
-            &subscribed,
             &mut slots,
         )
     }
@@ -512,7 +509,6 @@ mod tests {
             hidden,
             hidden,
             &[(0, 0)],
-            &HashSet::from([(0, 0)]),
             &mut slots,
         );
 
@@ -574,5 +570,62 @@ mod tests {
         indices.sort_unstable();
         indices.dedup();
         assert_eq!(indices.len(), len);
+    }
+
+    /// Flood fill with a cap smaller than the open region: two passes (first with
+    /// continuation, second seeded from it) must cover the full region with no
+    /// duplicate reveals across passes.
+    #[test]
+    fn capped_fill_plus_continuation_covers_full_region_no_duplicates() {
+        let cs = 4i32;
+        let cells = (cs * cs) as usize;
+        let cap = 8u32; // region has 16 cells; cap at 8
+
+        // Pass 1
+        let mut chunks1 = [TestChunk::open(cells)];
+        let out1 = run_fill(cs, cap, &[(0, 0)], &mut chunks1, &[(0, 0)]);
+        assert!(out1.capped, "expected first pass to be capped");
+        assert_eq!(out1.revealed_count, cap);
+        assert!(!out1.continuation.is_empty(), "expected non-empty continuation");
+
+        // Collect all indices revealed in pass 1
+        let mut all_indices: std::collections::HashSet<u32> = out1
+            .reveals
+            .iter()
+            .flat_map(|r| r.indices.iter().copied())
+            .collect();
+        assert_eq!(all_indices.len(), cap as usize);
+
+        // Pass 2: seed from continuation, mark pass-1 cells as already revealed
+        let mut p2_revealed = vec![HIDDEN_CELL; cells];
+        for &idx in &all_indices {
+            p2_revealed[idx as usize] = 0; // mark as revealed
+        }
+        let p2_chunks = [TestChunk {
+            mines: vec![0u8; cells],
+            revealed: p2_revealed,
+            flagged: vec![HIDDEN_CELL; cells],
+        }];
+        let mut p2_slots = [ChunkSlot {
+            chunk_x: 0,
+            chunk_y: 0,
+            mines: &p2_chunks[0].mines,
+            revealed: &p2_chunks[0].revealed,
+            flagged: &p2_chunks[0].flagged,
+            new_indices: Vec::new(),
+        }];
+        let seeds2: Vec<(i32, i32)> = out1.continuation.clone();
+        let out2 = flood_fill(cs, cells as u32, 0, HIDDEN_CELL, HIDDEN_CELL, &seeds2, &mut p2_slots);
+
+        // Pass 2 must reveal exactly the remaining cells (no overlap, no duplicates)
+        let remaining = cells as u32 - cap;
+        assert_eq!(out2.revealed_count, remaining, "pass 2 should reveal remaining cells");
+        for &idx in out2.reveals.iter().flat_map(|r| r.indices.iter()) {
+            assert!(
+                all_indices.insert(idx),
+                "index {idx} was revealed in both passes — duplicate"
+            );
+        }
+        assert_eq!(all_indices.len(), cells, "total reveals should equal full region");
     }
 }

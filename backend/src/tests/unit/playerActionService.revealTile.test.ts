@@ -167,7 +167,10 @@ describe('PlayerActionService', () => {
         id: socketId,
         username: 'Test Player',
         status: PlayerStatus.ACTIVE,
-        score: 0
+        score: 0,
+        x: 0,
+        y: 0,
+        color: '#000000'
       };
       
       mockGame.players = {

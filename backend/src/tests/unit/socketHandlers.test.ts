@@ -25,6 +25,7 @@ describe('Socket Handler Integration', () => {
       createGame: jest.fn().mockResolvedValue(undefined),
       addPlayer: jest.fn(),
       getGame: jest.fn().mockReturnValue({ players: {} }),
+      listPlayerPositions: jest.fn().mockReturnValue([]),
     };
     received = undefined;
   });
