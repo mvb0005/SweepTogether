@@ -70,7 +70,6 @@ type NativeFloodFillFn = (opts: {
     hiddenRevealed: number;
     hiddenFlagged: number;
     seeds: number[][];
-    subscribed: number[][];
     chunks: NativeFloodFillChunk[];
 }) => NativeFloodFillResult;
 type NativeFloodFillAsyncFn = (opts: {
@@ -80,7 +79,6 @@ type NativeFloodFillAsyncFn = (opts: {
     hiddenRevealed: number;
     hiddenFlagged: number;
     seeds: number[][];
-    subscribed: number[][];
     chunks: NativeFloodFillChunk[];
 }) => Promise<NativeFloodFillResult>;
 interface NativeAddon {
@@ -911,10 +909,7 @@ export class GameStateService {
         cm: ChunkManager,
         startPoints: { x: number; y: number }[],
         cs: number,
-    ): {
-        subscribed: { chunkX: number; chunkY: number }[];
-        chunks: NativeFloodFillChunk[];
-    } | null {
+    ): { chunks: NativeFloodFillChunk[] } | null {
         this.ensureMaterializedForPoints(cm, gameId, startPoints, cs);
 
         const subscribed = this.listSubscribedChunkCoords(gameId);
@@ -933,7 +928,7 @@ export class GameStateService {
             });
         }
         if (nativeChunks.length === 0) return null;
-        return { subscribed, chunks: nativeChunks };
+        return { chunks: nativeChunks };
     }
 
     private applyNativeReveals(
@@ -974,7 +969,7 @@ export class GameStateService {
     private async runNativeFloodFill(
         startPoints: { x: number; y: number }[],
         cs: number,
-        payload: { subscribed: { chunkX: number; chunkY: number }[]; chunks: NativeFloodFillChunk[] },
+        payload: { chunks: NativeFloodFillChunk[] },
     ): Promise<{ result: NativeFloodFillResult; async: boolean; bfsMs: number } | null> {
         const opts = {
             chunkSize: cs,
@@ -983,7 +978,6 @@ export class GameStateService {
             hiddenRevealed: HIDDEN_CELL,
             hiddenFlagged: HIDDEN_CELL,
             seeds: startPoints.map(p => [p.x, p.y]),
-            subscribed: payload.subscribed.map(c => [c.chunkX, c.chunkY]),
             chunks: payload.chunks,
         };
 
