@@ -37,6 +37,9 @@ export interface Player {
   lockedUntil?: number; // Timestamp
   status?: string; // Player status from backend (ACTIVE, LOCKED_OUT, etc.)
   viewport?: ViewportState; // Add viewport information to player
+  x?: number;
+  y?: number;
+  color?: string;
 }
 
 export interface LeaderboardEntry {
@@ -105,8 +108,13 @@ export interface ChunkCoords {
 
 export interface Chunk {
   coords: ChunkCoords;
-  cells: CellState[][]; // 2D array of cells within the chunk
-  isLoading?: boolean; // For frontend loading state
+  size: number;
+  /** Chunk-local cell indices with non-mine reveals. Parallel to `adjMines`. */
+  revealed: number[];
+  adjMines: number[];
+  revealedMines: number[];
+  flagged: number[];
+  isLoading?: boolean;
 }
 
 export type ChunkMap = Record<string, Chunk>;

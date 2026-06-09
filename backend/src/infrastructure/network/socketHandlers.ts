@@ -14,6 +14,7 @@ import { TelemetryBatchPayload } from '../../types/telemetryTypes';
 import { getPendingFillsRepository } from '../persistence/db';
 
 const CHUNK_SUB_DEBOUNCE_MS = 50;
+const MAX_TELEMETRY_EVENTS_PER_BATCH = 256;
 
 interface PendingChunkSubs {
   gameId: string;
@@ -40,6 +41,19 @@ function clearPendingSubs(socketId: string): void {
 }
 
 const MAX_SUBSCRIBE_FILL_SEEDS = 300;
+const EVICT_DEBOUNCE_MS = 400;
+const evictTimersByGame = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleEvictUnsubscribed(gameStateService: GameStateService, gameId: string): void {
+  const existing = evictTimersByGame.get(gameId);
+  if (existing) clearTimeout(existing);
+  evictTimersByGame.set(gameId, setTimeout(() => {
+    evictTimersByGame.delete(gameId);
+    gameStateService.evictUnsubscribedChunksAsync(gameId).catch(err => {
+      console.error('[subscribeToChunks] evict failed:', err);
+    });
+  }, EVICT_DEBOUNCE_MS));
+}
 
 function collectFillPoints(
   chunkManager: ChunkManager,
@@ -92,7 +106,6 @@ async function flushChunkSubscriptions(
     for (const { chunkX, chunkY } of coords) {
       const chunk = chunkManager.getChunkById(`${chunkX}_${chunkY}`);
       if (chunk) {
-        invalidateChunkWireCache(chunk);
         cachedBatch.push(serializeChunkWire(chunk, gameId));
       } else {
         uncachedCoords.push({ chunkX, chunkY });
@@ -142,9 +155,7 @@ async function flushChunkSubscriptions(
       setImmediate(() => gameStateService.enqueueFill(gameId, allFillPoints, socket.id));
     }
 
-    gameStateService.evictUnsubscribedChunksAsync(gameId).catch(err => {
-      console.error('[subscribeToChunks] evict failed:', err);
-    });
+    scheduleEvictUnsubscribed(gameStateService, gameId);
 
     console.log(
       `[subscribeToChunks] chunks=${coords.length} cached=${cachedBatch.length} uncached=${uncachedCoords.length} fills=${allFillPoints.length} stream=${(performance.now() - t0).toFixed(1)}ms socket=${socket.id}`
@@ -195,9 +206,14 @@ export function registerSocketHandlers(
 ) {
   console.log(`New client connected: ${socket.id}`);
 
-  socket.on('joinGame', async (data: { gameId: string; username?: string }) => {
+  socket.on('joinGame', async (data: {
+    gameId: string;
+    username?: string;
+    avatarUrl?: string;
+    discordUserId?: string;
+  }) => {
     try {
-      const { gameId, username = 'Anonymous' } = data;
+      const { gameId, username = 'Anonymous', avatarUrl, discordUserId } = data;
       if (!gameStateService.gameExists(gameId)) {
         const defaultConfig: GameConfig = {
           isInfiniteWorld: true,
@@ -208,7 +224,7 @@ export function registerSocketHandlers(
         await gameStateService.createGame(gameId, defaultConfig);
       }
       const playerId = socket.id;
-      gameStateService.addPlayer(gameId, playerId, username);
+      gameStateService.addPlayer(gameId, playerId, username, avatarUrl, discordUserId);
       socket.join(gameId);
       socket.data.gameId = gameId;
       const gameState = gameStateService.getGame(gameId);
@@ -217,6 +233,7 @@ export function registerSocketHandlers(
         gameId,
         playerId,
         players: gameState?.players ?? {},
+        playerPositions: gameStateService.listPlayerPositions(gameId),
       });
       socket.to(gameId).emit('playerJoined', {
         gameId,
@@ -262,17 +279,26 @@ export function registerSocketHandlers(
     scheduleChunkSubscription(socket, data.gameId, data.chunks, gameStateService);
   });
 
+  socket.on('movePlayer', (data: { gameId?: string; dx: number; dy: number }) => {
+    const gameId = data.gameId ?? (socket.data.gameId as string | undefined);
+    if (!gameId) return;
+    const playerId = socket.id;
+    const result = gameStateService.movePlayer(gameId, playerId, data.dx, data.dy);
+    if (!result) return;
+    socket.to(gameId).emit('playerMoved', { playerId, x: result.x, y: result.y });
+    socket.emit('playerMoved', { playerId, x: result.x, y: result.y });
+  });
+
   socket.on('telemetryEvents', (data: TelemetryBatchPayload) => {
-    if (!data?.events?.length) return;
-    telemetryService.ingest(data.events);
-    telemetryService.logBatch(data.sessionId, data.variant, data.events.length);
-    for (const event of data.events) {
-      if (event.durationMs === undefined) continue;
-      const attrs = event.attrs
-        ? ' ' + Object.entries(event.attrs).map(([k, v]) => `${k}=${v}`).join(' ')
-        : '';
-      console.log(`[telemetry] variant=${event.variant} ${event.name}=${event.durationMs.toFixed(1)}ms${attrs}`);
-    }
+    // Unauthenticated client input: validate shape and cap batch size so a
+    // malicious client can't flood logs/memory. Per-event console.log removed
+    // (log-flood vector); telemetryService keeps its own bounded buffer.
+    if (!data || !Array.isArray(data.events) || data.events.length === 0) return;
+    const events = data.events.slice(0, MAX_TELEMETRY_EVENTS_PER_BATCH);
+    const sessionId = typeof data.sessionId === 'string' ? data.sessionId.slice(0, 64) : 'unknown';
+    const variant = typeof data.variant === 'string' ? data.variant.slice(0, 64) : 'unknown';
+    telemetryService.ingest(events);
+    telemetryService.logBatch(sessionId, variant, events.length);
   });
 
   socket.on('unsubscribeFromChunk', (data: { gameId: string; chunkX: number; chunkY: number }) => {

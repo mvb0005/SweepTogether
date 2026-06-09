@@ -115,6 +115,14 @@ body,
   max-width: 520px;
 }
 
+.game-view__error {
+  position: absolute;
+  top: 96px;
+  left: 12px;
+  z-index: 11;
+  pointer-events: none;
+}
+
 .game-overlay {
   position: absolute;
   inset: 0;
@@ -130,12 +138,27 @@ body,
   background: rgba(20, 22, 28, 0.95);
 }
 
+.app--loading {
+  min-height: 100vh;
+  background: #14161a;
+}
+
 .loading-message {
-  position: absolute;
-  inset: 0;
+  min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   color: #9aa0a6;
   font-size: 15px;
+  background: #14161a;
+}
+
+.loading-message__error {
+  color: #ff8a80;
+  font-size: 13px;
+  max-width: 420px;
+  text-align: center;
+  padding: 0 16px;
 }

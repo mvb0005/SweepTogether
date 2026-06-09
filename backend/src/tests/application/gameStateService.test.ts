@@ -13,6 +13,7 @@ jest.mock('../../infrastructure/persistence/db', () => ({
         revealCells: jest.fn().mockResolvedValue(undefined),
         setFlagged: jest.fn().mockResolvedValue(undefined),
         load: jest.fn().mockResolvedValue(null),
+        listIds: jest.fn().mockResolvedValue([]),
     }),
     getPendingFillsRepository: () => ({
         loadAll: jest.fn().mockResolvedValue(new Map()),
@@ -32,11 +33,16 @@ jest.mock('../../domain/ChunkManager', () => {
             ensureChunksAroundPlayer: jest.fn(),
             getLoadedChunks: jest.fn().mockReturnValue([]),
             getChunkKey: jest.fn((x: number, y: number) => `${x},${y}`),
-            pendingFills: new Map(),
-            convertGlobalToChunkLocalCoordinates: jest.fn(),
+            getChunkId: jest.fn((x: number, y: number) => `${x}_${y}`),
+            getChunkById: jest.fn().mockReturnValue(undefined),
+            convertGlobalToChunkLocalCoordinates: jest.fn((x: number, y: number) => ({
+                chunkCoordinate: { x: Math.floor(x / 32), y: Math.floor(y / 32) },
+                localCoordinate: { x: ((x % 32) + 32) % 32, y: ((y % 32) + 32) % 32 },
+            })),
             revealTile: jest.fn(),
             flagTile: jest.fn(),
             chordTile: jest.fn(),
+            pendingFills: new Map(),
         };
     });
     return { ChunkManager: MockedChunkManager };
@@ -275,6 +281,22 @@ describe('GameStateService', () => {
             expect(player.username).toBe(username1);
             expect(player.score).toBe(0);
             expect(player.status).toBe(PlayerStatus.ACTIVE);
+            expect(player.x).toBe(0);
+            expect(player.y).toBe(0);
+            expect(player.color).toBeTruthy();
+        });
+
+        it('should move a player orthogonally', () => {
+            gameStateService.addPlayer(gameId1, playerId1, username1);
+            const pos = gameStateService.movePlayer(gameId1, playerId1, 1, 0);
+            expect(pos).toEqual({ x: 1, y: 0 });
+        });
+
+        it('should reject invalid moves', () => {
+            gameStateService.addPlayer(gameId1, playerId1, username1);
+            expect(gameStateService.movePlayer(gameId1, playerId1, 1, 1)).toBeNull();
+            gameStateService.movePlayer(gameId1, playerId1, 1, 0);
+            expect(gameStateService.movePlayer(gameId1, playerId1, 0, 1)).toBeNull();
         });
 
         it('should not add a player if they already exist', () => {

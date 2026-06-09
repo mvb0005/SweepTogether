@@ -16,20 +16,15 @@ import {
 import { ChunkCoords, Coordinates, ViewportState } from '../types';
 import { chunkSetKey } from '../utils/chunkKeys';
 import { useTelemetry } from './TelemetryContext';
+import { usePlayerContext } from './PlayerContext';
 
 export interface ViewportContextValue {
   viewport: ViewportState;
   scale: number;
   cellPx: number;
-  /** Chunks in the visible viewport — subscribe immediately. */
   immediateChunks: ChunkCoords[];
-  /** Visible + buffer — subscribe immediately (prefetch). */
   prefetchChunks: ChunkCoords[];
-  /** Debounced retention zone — controls when to unsubscribe. */
   retentionChunks: ChunkCoords[];
-  onPanStart: (clientX: number, clientY: number) => void;
-  onPanMove: (clientX: number, clientY: number) => void;
-  onPanEnd: () => void;
   onZoom: (delta: number) => void;
   hoverCell: Coordinates | null;
   setHoverCell: (cell: Coordinates | null) => void;
@@ -39,7 +34,6 @@ const ViewportContext = createContext<ViewportContextValue | null>(null);
 
 interface ViewportProviderProps {
   chunkSize: number;
-  initialCenter?: Coordinates;
   children: React.ReactNode;
 }
 
@@ -90,22 +84,16 @@ function getBufferedChunks(
 
 export const ViewportProvider: React.FC<ViewportProviderProps> = ({
   chunkSize,
-  initialCenter,
   children,
 }) => {
   const { config, track } = useTelemetry();
+  const { subscriptionCenter, movementDir } = usePlayerContext();
   const [scale, setScale] = useState(1);
   const cellPx = BASE_CELL_PX * scale;
   const [hoverCell, setHoverCell] = useState<Coordinates | null>(null);
 
-  const {
-    viewport,
-    handlePanStart,
-    handlePanMove,
-    handlePanEnd,
-    resizeTo,
-  } = useViewport({
-    initialCenter: initialCenter ?? { x: 0, y: 0 },
+  const { viewport, resizeTo } = useViewport({
+    initialCenter: subscriptionCenter,
     initialWidth: Math.ceil(window.innerWidth / BASE_CELL_PX),
     initialHeight: Math.ceil(window.innerHeight / BASE_CELL_PX),
     cellSizePx: cellPx,
@@ -127,21 +115,21 @@ export const ViewportProvider: React.FC<ViewportProviderProps> = ({
     setScale(s => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s * (1 + delta))));
   }, []);
 
-  const prevCenterRef = useRef(viewport.center);
-  const panDirRef = useRef({ dx: 0, dy: 0 });
-  const dx = viewport.center.x - prevCenterRef.current.x;
-  const dy = viewport.center.y - prevCenterRef.current.y;
-  if (dx !== 0 || dy !== 0) {
-    panDirRef.current = { dx: Math.sign(dx), dy: Math.sign(dy) };
-    prevCenterRef.current = viewport.center;
-  }
+  const subscriptionViewport: ViewportState = {
+    ...viewport,
+    center: subscriptionCenter,
+  };
 
-  const immediateChunks = getVisibleChunks(viewport, chunkSize);
-  const prefetchChunks = getBufferedChunks(viewport, chunkSize, panDirRef.current, config.chunkBuffer);
+  const immediateChunks = getVisibleChunks(subscriptionViewport, chunkSize);
+  const prefetchChunks = getBufferedChunks(
+    subscriptionViewport,
+    chunkSize,
+    movementDir,
+    Math.min(6, Math.max(2, Math.round(config.chunkBuffer * scale))),
+  );
   const prefetchKey = chunkSetKey(prefetchChunks);
   const [retentionChunks, setRetentionChunks] = useState<ChunkCoords[]>(prefetchChunks);
-  const retentionKey = chunkSetKey(retentionChunks);
-  const prevRetentionKeyRef = useRef(retentionKey);
+  const prevRetentionKeyRef = useRef(prefetchKey);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -167,9 +155,6 @@ export const ViewportProvider: React.FC<ViewportProviderProps> = ({
     immediateChunks,
     prefetchChunks,
     retentionChunks,
-    onPanStart: handlePanStart,
-    onPanMove: handlePanMove,
-    onPanEnd: handlePanEnd,
     onZoom,
     hoverCell,
     setHoverCell,

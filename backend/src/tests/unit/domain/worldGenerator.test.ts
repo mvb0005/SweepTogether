@@ -1,4 +1,4 @@
-import { WorldGenerator, Noise2DFunction } from '../../../domain/worldGenerator';
+﻿import { WorldGenerator, Noise2DFunction } from '../../../domain/worldGenerator';
 
 describe('WorldGenerator', () => {
     const TEST_SEED = 'test-seed';

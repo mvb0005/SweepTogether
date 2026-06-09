@@ -1,7 +1,8 @@
 import { IChunkManager, IChunk, Coordinate, CHUNK_SIZE, PendingFillItem, ChunkPersistenceLoader } from '../types/chunkTypes';
 import { invalidateChunkWireCache } from '../application/chunkWire';
-import { Chunk } from './Chunk';
-import { Cell, Coordinates } from './types'; // Assuming Cell is in domain/types.ts
+import { BufferChunk } from './BufferChunk';
+import { extractPersistedState, getChunkBuffers, minesFromGenerator, ChunkBufferView, HIDDEN_CELL } from './chunkBuffers';
+import { Cell, Coordinates } from './types';
 
 export class ChunkManager implements IChunkManager {
   public chunks: Map<string, IChunk>;
@@ -63,45 +64,35 @@ export class ChunkManager implements IChunkManager {
     revealedBuf?: Buffer,
     flaggedBuf?: Buffer,
   ): IChunk {
-    const resolvedMines = mines ?? this.chunkMineGenerator?.(chunkX, chunkY);
-    const chunk = new Chunk(chunkX, chunkY, this.chunkSize, this.worldGenerator, resolvedMines, this.broadcastChunkUpdate);
+    const size = this.chunkSize;
+    const cells = size * size;
+    const resolvedMines = mines
+      ?? this.chunkMineGenerator?.(chunkX, chunkY)
+      ?? minesFromGenerator(chunkX, chunkY, size, this.worldGenerator);
 
-    if (revealedBuf || flaggedBuf) {
-      const size = this.chunkSize;
-      for (let ly = 0; ly < size; ly++) {
-        for (let lx = 0; lx < size; lx++) {
-          const idx = ly * size + lx;
-          const revealed = revealedBuf ? revealedBuf[idx] !== 0xff : false;
-          const flagged = flaggedBuf ? flaggedBuf[idx] !== 0xff : false;
-          if (!revealed && !flagged) continue;
-          const cell = chunk.getTile(lx, ly);
-          if (!cell) continue;
-          if (revealed) {
-            cell.revealed = true;
-            chunk.setTile(lx, ly, cell);
-          }
-          if (flagged) {
-            cell.flagged = true;
-            chunk.setTile(lx, ly, cell);
-          }
-        }
+    let revealed = revealedBuf ? Buffer.from(revealedBuf) : Buffer.alloc(cells, 0xff);
+    let flagged = flaggedBuf ? Buffer.from(flaggedBuf) : Buffer.alloc(cells, 0xff);
+
+    if (!revealedBuf) {
+      for (const idx of revealedIndices) {
+        if (idx >= 0 && idx < cells) revealed[idx] = 0;
       }
-      return chunk;
+    }
+    if (!flaggedBuf) {
+      for (const idx of flaggedIndices) {
+        if (idx >= 0 && idx < cells) flagged[idx] = 0;
+      }
     }
 
-    for (const idx of revealedIndices) {
-      const lx = idx % this.chunkSize;
-      const ly = Math.floor(idx / this.chunkSize);
-      const cell = chunk.getTile(lx, ly);
-      if (cell) chunk.setTile(lx, ly, { ...cell, revealed: true });
-    }
-    for (const idx of flaggedIndices) {
-      const lx = idx % this.chunkSize;
-      const ly = Math.floor(idx / this.chunkSize);
-      const cell = chunk.getTile(lx, ly);
-      if (cell) chunk.setTile(lx, ly, { ...cell, flagged: true });
-    }
-    return chunk;
+    return new BufferChunk(
+      chunkX,
+      chunkY,
+      resolvedMines,
+      revealed,
+      flagged,
+      size,
+      this.broadcastChunkUpdate,
+    );
   }
 
   public async getChunk(chunkX: number, chunkY: number): Promise<IChunk> {
@@ -193,6 +184,69 @@ export class ChunkManager implements IChunkManager {
       const chunkId = this.getChunkId(chunkX, chunkY);
       if (this.chunks.has(chunkId) || this.deferredChunks.has(chunkId)) continue;
       this.noiseMinesCache.set(chunkId, mines);
+    }
+  }
+
+  public hasNoiseMines(chunkX: number, chunkY: number): boolean {
+    return this.noiseMinesCache.has(this.getChunkId(chunkX, chunkY));
+  }
+
+  public hasDeferredChunk(chunkX: number, chunkY: number): boolean {
+    return this.deferredChunks.has(this.getChunkId(chunkX, chunkY));
+  }
+
+  /** Buffer snapshot for flood fill without requiring a materialized chunk. */
+  public snapshotForFill(chunkX: number, chunkY: number): ChunkBufferView | null {
+    const chunkId = this.getChunkId(chunkX, chunkY);
+    const materialized = this.chunks.get(chunkId);
+    if (materialized) {
+      return getChunkBuffers(materialized);
+    }
+
+    const cells = this.chunkSize * this.chunkSize;
+    const resolveMines = (mines?: Uint8Array): Uint8Array | null => {
+      if (mines) return mines;
+      if (this.chunkMineGenerator) {
+        try {
+          return this.chunkMineGenerator(chunkX, chunkY);
+        } catch {
+          return null;
+        }
+      }
+      return minesFromGenerator(chunkX, chunkY, this.chunkSize, this.worldGenerator);
+    };
+
+    const deferred = this.deferredChunks.get(chunkId);
+    if (deferred) {
+      const mines = resolveMines(deferred.mines ?? this.noiseMinesCache.get(chunkId));
+      if (!mines) return null;
+      return {
+        mines,
+        revealed: deferred.revealedBuf ? Buffer.from(deferred.revealedBuf) : Buffer.alloc(cells, HIDDEN_CELL),
+        flagged: deferred.flaggedBuf ? Buffer.from(deferred.flaggedBuf) : Buffer.alloc(cells, HIDDEN_CELL),
+      };
+    }
+
+    const cachedMines = this.noiseMinesCache.get(chunkId);
+    if (cachedMines) {
+      return {
+        mines: cachedMines,
+        revealed: Buffer.alloc(cells, HIDDEN_CELL),
+        flagged: Buffer.alloc(cells, HIDDEN_CELL),
+      };
+    }
+
+    return null;
+  }
+
+  public ensureMaterialized(chunkX: number, chunkY: number): IChunk | null {
+    const chunkId = this.getChunkId(chunkX, chunkY);
+    const existing = this.chunks.get(chunkId);
+    if (existing) return existing;
+    try {
+      return this.materializeChunk(chunkX, chunkY);
+    } catch {
+      return null;
     }
   }
 
@@ -289,6 +343,16 @@ export class ChunkManager implements IChunkManager {
     flaggedBuf: Buffer;
     hasPersistedState: boolean;
   } {
+    const bufs = getChunkBuffers(chunk);
+    if (bufs) {
+      return {
+        mines: bufs.mines,
+        revealedBuf: bufs.revealed,
+        flaggedBuf: bufs.flagged,
+        hasPersistedState: extractPersistedState(chunk),
+      };
+    }
+
     const size = chunk.size;
     const cells = size * size;
     const mines = new Uint8Array(cells);
@@ -297,8 +361,11 @@ export class ChunkManager implements IChunkManager {
     let hasPersistedState = false;
 
     for (let ly = 0; ly < size; ly++) {
+      const row = chunk.tiles[ly];
+      if (!row) continue;
       for (let lx = 0; lx < size; lx++) {
-        const cell = chunk.tiles[ly][lx];
+        const cell = row[lx];
+        if (!cell) continue;
         const idx = ly * size + lx;
         mines[idx] = cell.isMine ? 0xff : cell.adjacentMines;
         if (cell.revealed) {

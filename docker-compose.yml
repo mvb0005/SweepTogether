@@ -5,6 +5,11 @@ services:
       args:
         NODE_ENV: development
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "${DOCKER_BACKEND_CPU_LIMIT:-4.0}"
+          memory: ${DOCKER_BACKEND_MEM_LIMIT:-4G}
     ports:
       - "3001:3000"
     volumes:
@@ -18,6 +23,9 @@ services:
       - MONGODB_URI=mongodb://mongo_user:mongo_password@mongo:27017/minesweeper_infinite?authSource=admin
       - DB_NAME=minesweeper_infinite
       - NODE_OPTIONS=--max-old-space-size=4096
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}
+      - SOCKET_CORS_ORIGINS=${SOCKET_CORS_ORIGINS:-https://local.sweeptogether.com,http://local.sweeptogether.com,http://localhost:8080}
     depends_on:
       - mongo
     networks:
@@ -25,6 +33,11 @@ services:
 
   frontend:
     build: ./frontend
+    deploy:
+      resources:
+        limits:
+          cpus: "${DOCKER_FRONTEND_CPU_LIMIT:-2.0}"
+          memory: ${DOCKER_FRONTEND_MEM_LIMIT:-2G}
     command: ["npm", "run", "dev", "--", "--host"]
     volumes:
       - ./frontend:/app
@@ -36,6 +49,11 @@ services:
 
   mongo-express:
     image: mongo-express:latest
+    deploy:
+      resources:
+        limits:
+          cpus: "${DOCKER_MONGO_EXPRESS_CPU_LIMIT:-0.5}"
+          memory: ${DOCKER_MONGO_EXPRESS_MEM_LIMIT:-256M}
     ports:
       - "8081:8081"
     environment:
@@ -51,6 +69,11 @@ services:
 
   nginx:
     image: nginx:stable-alpine
+    deploy:
+      resources:
+        limits:
+          cpus: "${DOCKER_NGINX_CPU_LIMIT:-1.0}"
+          memory: ${DOCKER_NGINX_MEM_LIMIT:-256M}
     ports:
       - "8080:80"
     volumes:
@@ -72,6 +95,11 @@ services:
 
   mongo:
     image: mongo:latest
+    deploy:
+      resources:
+        limits:
+          cpus: "${DOCKER_MONGO_CPU_LIMIT:-2.0}"
+          memory: ${DOCKER_MONGO_MEM_LIMIT:-2G}
     environment:
       MONGO_INITDB_ROOT_USERNAME: mongo_user
       MONGO_INITDB_ROOT_PASSWORD: mongo_password
@@ -85,6 +113,11 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:latest
+    deploy:
+      resources:
+        limits:
+          cpus: "${DOCKER_CLOUDFLARED_CPU_LIMIT:-0.5}"
+          memory: ${DOCKER_CLOUDFLARED_MEM_LIMIT:-256M}
     command: tunnel --no-autoupdate run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}

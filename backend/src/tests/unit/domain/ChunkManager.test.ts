@@ -35,6 +35,17 @@ describe('ChunkManager and Chunk - Pending Fill Propagation', () => {
     }
   });
 
+  it('snapshotForFill reads noise cache without materializing', () => {
+    const cm = new ChunkManager('testgame', CHUNK_SIZE, createCellGenerator());
+    const mines = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
+    cm.registerNoiseChunks([{ chunkX: 3, chunkY: 4, mines }]);
+    expect(cm.getChunkById('3_4')).toBeUndefined();
+    const snap = cm.snapshotForFill(3, 4);
+    expect(snap).not.toBeNull();
+    expect(snap!.mines).toBe(mines);
+    expect(snap!.revealed.every(v => v === 0xff)).toBe(true);
+  });
+
   it('should process pending fills when chunk is loaded/subscribed', async () => {
     const hasActiveSubscribers = (gameId: string, chunkX: number, chunkY: number) =>
       (chunkX === 0 && chunkY === 0) || (chunkX === 1 && chunkY === 1);

@@ -1,19 +1,11 @@
 import { ChunkManager } from '../../domain/ChunkManager';
-import { Chunk } from '../../domain/Chunk';
+import { BufferChunk } from '../../domain/BufferChunk';
 import { CHUNK_SIZE } from '../../types/chunkTypes';
-import { IChunk } from '../../types/chunkTypes';
-
-// Mock the Chunk class
-jest.mock('../../domain/Chunk');
-
-const MockedChunk = Chunk as jest.MockedClass<typeof Chunk>;
 
 describe('ChunkManager', () => {
   let chunkManager: ChunkManager;
-  const defaultCellGenerator = expect.any(Function); // Placeholder for the default generator
 
   beforeEach(() => {
-    MockedChunk.mockClear();
     chunkManager = new ChunkManager('testgame');
   });
 
@@ -21,8 +13,7 @@ describe('ChunkManager', () => {
     it('should initialize correctly', async () => {
       expect(chunkManager).toBeDefined();
       const chunk = await chunkManager.getChunk(0, 0);
-      expect(MockedChunk).toHaveBeenCalledTimes(1);
-      expect(chunk).toBeInstanceOf(MockedChunk);
+      expect(chunk).toBeInstanceOf(BufferChunk);
     });
   });
 
@@ -99,12 +90,11 @@ describe('ChunkManager', () => {
   describe('getChunk', () => {
     it('should return an existing chunk or create a new one if it does not exist', async () => {
       const createdChunk = await chunkManager.getChunk(0, 0);
-      expect(createdChunk).toBeInstanceOf(MockedChunk);
-      expect(MockedChunk).toHaveBeenCalledWith(0, 0, CHUNK_SIZE, expect.any(Function), undefined, expect.any(Function));
+      expect(createdChunk).toBeInstanceOf(BufferChunk);
+      expect(createdChunk.size).toBe(CHUNK_SIZE);
 
       const retrievedChunk = await chunkManager.getChunk(0, 0);
       expect(retrievedChunk).toBe(createdChunk);
-      expect(MockedChunk).toHaveBeenCalledTimes(1);
     });
   });
 
