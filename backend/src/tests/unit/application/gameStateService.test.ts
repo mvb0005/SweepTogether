@@ -349,14 +349,21 @@ describe('GameStateService', () => {
             );
         });
 
-        it('should not add a player if already added', () => {
+        it('should update username on rejoin but preserve score and status', () => {
+            // Re-joining (e.g. Discord reconnect) updates the display name but
+            // must NOT reset score or status — no duplicate player entry is created.
             gameStateService.addPlayer(GAME_ID_1, PLAYER_ID_1, USERNAME_1);
             const gameBefore = gameStateService.getGame(GAME_ID_1);
-            const playerBefore = { ...gameBefore?.players[PLAYER_ID_1] };
+            expect(Object.keys(gameBefore?.players ?? {}).length).toBe(1);
 
-            gameStateService.addPlayer(GAME_ID_1, PLAYER_ID_1, 'NewName'); 
+            gameStateService.addPlayer(GAME_ID_1, PLAYER_ID_1, 'NewName');
             const gameAfter = gameStateService.getGame(GAME_ID_1);
-            expect(gameAfter?.players[PLAYER_ID_1]).toEqual(playerBefore); 
+            const playerAfter = gameAfter?.players[PLAYER_ID_1];
+
+            expect(Object.keys(gameAfter?.players ?? {}).length).toBe(1);
+            expect(playerAfter?.username).toBe('NewName');
+            expect(playerAfter?.score).toBe(gameBefore?.players[PLAYER_ID_1]?.score);
+            expect(playerAfter?.status).toBe(gameBefore?.players[PLAYER_ID_1]?.status);
         });
     });
 
