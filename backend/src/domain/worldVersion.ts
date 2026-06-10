@@ -30,3 +30,15 @@
  *       XOR-fold so cell_roll(s,x,y) ≠ cell_roll(s,y,x) structurally
  */
 export const WORLD_GEN_VERSION = 2;
+
+/**
+ * Returns the effective game ID used in MongoDB for a given base ID.
+ * Appending the version ensures old world data is automatically abandoned
+ * (not deleted) whenever the mine layout changes — old documents remain in
+ * Mongo under their previous key and the new world starts from scratch.
+ *
+ * Example: versionedGameId("default") → "default_v2"
+ */
+export function versionedGameId(baseId: string): string {
+    return `${baseId}_v${WORLD_GEN_VERSION}`;
+}

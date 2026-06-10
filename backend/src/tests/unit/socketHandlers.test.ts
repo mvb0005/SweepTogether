@@ -35,7 +35,7 @@ describe('Socket Handler Integration', () => {
     const joinHandler = mockSocket.on.mock.calls.find((call: string[]) => call[0] === 'joinGame')[1];
     await joinHandler({ gameId: 'game42', username: 'Bob' });
     expect(mockSocket.emit).toHaveBeenCalledWith('gameJoined', expect.objectContaining({
-      gameId: 'game42',
+      gameId: 'game42_v2',
       playerId: 'socket-abc',
     }));
   });

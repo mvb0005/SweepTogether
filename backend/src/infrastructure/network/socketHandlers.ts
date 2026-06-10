@@ -12,6 +12,7 @@ import { ChunkManager } from '../../domain/ChunkManager';
 import { telemetryService } from '../../application/telemetryService';
 import { TelemetryBatchPayload } from '../../types/telemetryTypes';
 import { getPendingFillsRepository } from '../persistence/db';
+import { versionedGameId } from '../../domain/worldVersion';
 
 const CHUNK_SUB_DEBOUNCE_MS = 50;
 const MAX_TELEMETRY_EVENTS_PER_BATCH = 256;
@@ -213,7 +214,8 @@ export function registerSocketHandlers(
     discordUserId?: string;
   }) => {
     try {
-      const { gameId, username = 'Anonymous', avatarUrl, discordUserId } = data;
+      const { gameId: baseGameId, username = 'Anonymous', avatarUrl, discordUserId } = data;
+      const gameId = versionedGameId(baseGameId);
       if (!gameStateService.gameExists(gameId)) {
         const defaultConfig: GameConfig = {
           isInfiniteWorld: true,

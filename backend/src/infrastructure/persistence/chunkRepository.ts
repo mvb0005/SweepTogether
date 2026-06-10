@@ -58,12 +58,6 @@ export class ChunkRepository {
     return new Map(docs.map(doc => [doc._id, doc as ChunkDocument]));
   }
 
-  /** Deletes every chunk document for a game. Used when world schema version changes. */
-  async dropAllForGame(gameId: string): Promise<number> {
-    const result = await this.collection.deleteMany({ gameId });
-    return result.deletedCount;
-  }
-
   /** Returns all persisted chunk _ids for a game (lightweight index for skipping DB on noise chunks). */
   async listIds(gameId: string): Promise<Set<string>> {
     const docs = await this.collection.find({ gameId }, { projection: { _id: 1 } }).toArray();

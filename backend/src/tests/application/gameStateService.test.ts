@@ -6,10 +6,7 @@ import { IChunkManager, CHUNK_SIZE } from '../../types/chunkTypes';
 import { SpatialHashGrid } from '../../domain/spatialHashGrid';
 
 jest.mock('../../infrastructure/persistence/db', () => ({
-    getGameRepository: () => ({
-        createOrLoad: jest.fn().mockResolvedValue({ seed: '12345', worldGenVersion: 2 }),
-        setWorldGenVersion: jest.fn().mockResolvedValue(undefined),
-    }),
+    getGameRepository: () => ({ createOrLoad: jest.fn().mockResolvedValue('12345') }),
     getChunkRepository: () => ({
         ensure: jest.fn().mockResolvedValue(undefined),
         getOrAddPlayerIndex: jest.fn().mockResolvedValue(0),
@@ -17,13 +14,11 @@ jest.mock('../../infrastructure/persistence/db', () => ({
         setFlagged: jest.fn().mockResolvedValue(undefined),
         load: jest.fn().mockResolvedValue(null),
         listIds: jest.fn().mockResolvedValue([]),
-        dropAllForGame: jest.fn().mockResolvedValue(0),
     }),
     getPendingFillsRepository: () => ({
         loadAll: jest.fn().mockResolvedValue(new Map()),
         save: jest.fn().mockResolvedValue(undefined),
         delete: jest.fn().mockResolvedValue(undefined),
-        dropAllForGame: jest.fn().mockResolvedValue(0),
     }),
 }));
 

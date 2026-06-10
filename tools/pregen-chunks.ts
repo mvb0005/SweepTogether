@@ -25,6 +25,7 @@ import { MongoClient } from 'mongodb';
 import { WorldGenerator } from '../src/domain/worldGenerator';
 import { ChunkRepository } from '../src/infrastructure/persistence/chunkRepository';
 import { GameRepository } from '../src/infrastructure/persistence/gameRepository';
+import { versionedGameId } from '../src/domain/worldVersion';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -32,7 +33,7 @@ import { GameRepository } from '../src/infrastructure/persistence/gameRepository
 
 const MONGO_URL  = process.env.MONGO_URL  ?? 'mongodb://mongo_user:mongo_password@mongo:27017/?authSource=admin';
 const DB_NAME    = process.env.DB_NAME    ?? 'minesweeper_infinite';
-const GAME_ID    = process.env.GAME_ID    ?? 'default';
+const GAME_ID    = versionedGameId(process.env.GAME_ID ?? 'default');
 const WORLD_SEED = process.env.WORLD_SEED ?? GAME_ID;
 const CHUNK_SIZE = 32;
 
